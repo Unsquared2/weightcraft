@@ -113,6 +113,7 @@ ROW_WISE: dict[str, Callable[[Matrix], Matrix]] = {
     "weights_from_bins": weights_from_bins,
     "rescaled_to_held_count": rescaled_to_held_count,
     "standardize_rows": standardize_rows,
+    "standardize_rows_sample": lambda v: standardize_rows(v, ddof=1),
     "row_rank_pct": row_rank_pct,
     "turnover": turnover,
     "lagged": lambda v: lagged(v, 0),

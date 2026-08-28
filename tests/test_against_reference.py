@@ -128,14 +128,14 @@ def naive_pairwise_covariance(window: Matrix) -> Matrix:
     return out
 
 
-def naive_z_score(values: Matrix) -> Matrix:
+def naive_z_score(values: Matrix, ddof: int = 0) -> Matrix:
     out = np.full(values.shape, np.nan)
     for row in range(values.shape[0]):
         seen = [v for v in values[row] if np.isfinite(v)]
-        if not seen:
+        if len(seen) <= ddof:
             continue
         mean = sum(seen) / len(seen)
-        variance = sum((v - mean) ** 2 for v in seen) / len(seen)
+        variance = sum((v - mean) ** 2 for v in seen) / (len(seen) - ddof)
         deviation = variance**0.5
         for column, value in enumerate(values[row]):
             if np.isfinite(value):
@@ -296,11 +296,22 @@ def test_a_complete_covariance_matrix_matches_numpy() -> None:
     assert np.allclose(observed_covariance(window), np.cov(window, rowvar=False))
 
 
-def test_a_z_score_matches_the_obvious_loop() -> None:
+@pytest.mark.parametrize("ddof", [0, 1, 2])
+def test_a_z_score_matches_the_obvious_loop(ddof: int) -> None:
     values: Matrix = np.asarray(
-        [[1.0, 2.0, 5.0], [np.nan, 4.0, 6.0], [3.0, 3.0, 3.0], [np.nan] * 3]
+        [
+            [1.0, 2.0, 5.0],
+            [np.nan, 4.0, 6.0],
+            [3.0, 3.0, 3.0],
+            [np.nan] * 3,
+            [7.0, np.nan, np.nan],
+        ]
     )
-    assert np.allclose(standardize_rows(values), naive_z_score(values), equal_nan=True)
+    assert np.allclose(
+        standardize_rows(values, ddof=ddof),
+        naive_z_score(values, ddof=ddof),
+        equal_nan=True,
+    )
 
 
 def test_a_percentile_rank_matches_the_obvious_loop() -> None:

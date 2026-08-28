@@ -19,23 +19,32 @@ def row_counts(values: Matrix) -> Vector:
     return counts
 
 
-def standardize_rows(values: Matrix) -> Matrix:
-    """Row z-score with `ddof=0`; a constant row scores zero rather than NaN."""
+def standardize_rows(values: Matrix, ddof: int = 0) -> Matrix:
+    """Row z-score dividing by `count - ddof`; a constant row scores zero.
+
+    `ddof=0` is the population deviation; `ddof=1` is the sample one, which is
+    what `numpy.std(ddof=1)` means. A row with no more observations than
+    `ddof` comes back missing.
+    """
+    if ddof < 0:
+        msg = f"ddof must not be negative, got {ddof}"
+        raise ValueError(msg)
     present = np.isfinite(values)
     filled = np.where(present, values, 0.0)
     counts = present.sum(axis=1, keepdims=True).astype(np.float64)
+    divisor = counts - float(ddof)
     with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
         mean = np.where(counts > 0.0, filled.sum(axis=1, keepdims=True) / counts, 0.0)
         centred = np.where(present, values - mean, np.nan)
         variance = np.where(
-            counts > 0.0,
+            divisor > 0.0,
             np.nansum(np.where(present, centred, 0.0) ** 2, axis=1, keepdims=True)
-            / counts,
-            0.0,
+            / np.where(divisor > 0.0, divisor, 1.0),
+            np.nan,
         )
         deviation = np.sqrt(variance)
         scaled: Matrix = np.where(deviation > 0.0, centred / deviation, centred * 0.0)
-    return np.where(present, scaled, np.nan)
+    return np.where(present & (divisor > 0.0), scaled, np.nan)
 
 
 def row_rank_pct(values: Matrix) -> Matrix:

@@ -42,6 +42,43 @@ def test_a_constant_row_scores_zero_rather_than_missing() -> None:
     assert standardize_rows(np.asarray([[2.0, 2.0]])).tolist() == [[0.0, 0.0]]
 
 
+def test_a_constant_row_still_scores_zero_on_the_sample_deviation() -> None:
+    """A row with no dispersion means the same thing whatever `ddof` is.
+
+    It expresses no view rather than no data, so it scores zero either way.
+    """
+    assert standardize_rows(np.asarray([[2.0, 2.0]]), ddof=1).tolist() == [[0.0, 0.0]]
+
+
+def test_the_sample_deviation_scales_the_population_one_by_the_bessel_factor() -> None:
+    """`ddof` only changes the divisor, so the row scales and nothing else.
+
+    `ddof=1` divides by `n - 1` where `ddof=0` divides by `n`, so every score
+    shrinks by `sqrt((n - 1) / n)`.
+    """
+    values = np.asarray([[1.0, 2.0, 5.0, 11.0]])
+    population = standardize_rows(values)
+    sample = standardize_rows(values, ddof=1)
+    assert np.allclose(sample, population * np.sqrt(3.0 / 4.0))
+
+
+def test_a_row_with_no_more_observations_than_ddof_is_missing() -> None:
+    """One observation has a mean but no sample deviation to divide by.
+
+    The answer is missing rather than a confident zero, which is what the
+    population deviation gives it.
+    """
+    values = np.asarray([[7.0, np.nan, np.nan]])
+    assert np.isnan(standardize_rows(values, ddof=1)).all()
+    assert standardize_rows(values)[0, 0] == 0.0
+    assert np.isnan(standardize_rows(values)[0, 1:]).all()
+
+
+def test_a_negative_ddof_is_refused() -> None:
+    with pytest.raises(ValueError, match="ddof"):
+        standardize_rows(np.asarray([[1.0, 2.0]]), ddof=-1)
+
+
 def test_standardising_preserves_where_the_gaps_were() -> None:
     scaled = standardize_rows(np.asarray([[1.0, np.nan, 3.0]]))
     assert np.isnan(scaled[0, 1])
