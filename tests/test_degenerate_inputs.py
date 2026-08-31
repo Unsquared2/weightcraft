@@ -16,6 +16,7 @@ import pytest
 
 from canonical import EVERY_SERIES, panel
 from weightcraft.align import align
+from weightcraft.band import no_trade_band
 from weightcraft.combine import (
     nanmean_stack,
     nanmedian_stack,
@@ -120,6 +121,7 @@ ROW_WISE: dict[str, Callable[[Matrix], Matrix]] = {
     "lag_rows": lambda v: lag_rows(v, 1),
     "rolling_mean": lambda v: rolling_mean(v, 2),
     "ewm_mean": lambda v: ewm_mean(v, 2),
+    "no_trade_band": lambda v: no_trade_band(v, 0.1),
 }
 
 
@@ -276,6 +278,7 @@ def test_a_field_of_all_missing_shares_falls_back_to_equal() -> None:
         (lambda: to_gross(np.zeros((1, 1)), 0.0), "must be positive"),
         (lambda: clip_allocation(np.zeros((1, 1)), 0.0), "must be positive"),
         (lambda: quantize(np.zeros((1, 1)), -1.0), "must be positive"),
+        (lambda: no_trade_band(np.zeros((1, 1)), 0.0), "must be positive"),
         (lambda: top_n_mask(np.zeros((1, 1)), 0), "at least 1"),
         (lambda: align([]), "at least one frame"),
         (
