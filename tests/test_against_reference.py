@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from canonical import NOISE, SPARSE_NOISE, correlated_panel, returns_panel
+from weightcraft.band import no_trade_band
 from weightcraft.costs import turnover
 from weightcraft.cross_section import (
     project_out_rows,
@@ -109,6 +110,28 @@ def naive_turnover(weights: Matrix) -> Matrix:
                 (now if np.isfinite(now) else 0.0)
                 - (before if np.isfinite(before) else 0.0)
             )
+    return out
+
+
+def naive_no_trade_band(target: Matrix, band: float) -> Matrix:
+    """A literal port of the scalar, row-by-row loop this function replaces."""
+    rows, columns = target.shape
+    out = np.full((rows, columns), np.nan)
+    current = [float("nan")] * columns
+    for row in range(rows):
+        wanted = [float(v) for v in target[row]]
+        seen = [abs(v) for v in wanted if np.isfinite(v)]
+        scale = sum(seen) / len(seen) if seen else float("nan")
+        if not np.isfinite(scale) or scale <= 0.0:
+            current = wanted
+        else:
+            for column in range(columns):
+                before = current[column]
+                after = wanted[column]
+                gap = not np.isfinite(before) or not np.isfinite(after)
+                if gap or abs(after - before) > band * scale:
+                    current[column] = after
+        out[row] = current
     return out
 
 
@@ -421,3 +444,14 @@ def test_lagging_matches_slicing_by_hand(periods: int) -> None:
     shifted = lag_rows(values, periods)
     assert np.array_equal(shifted[periods:], values[: 6 - periods])
     assert np.isnan(shifted[:periods]).all()
+
+
+@pytest.mark.parametrize("band", [0.05, 0.2, 0.5, 2.0])
+def test_no_trade_band_matches_the_scalar_loop(band: float) -> None:
+    generator = np.random.default_rng(41)
+    target: Matrix = generator.normal(size=(60, 5)) * 0.1
+    target[generator.random(target.shape) < 0.15] = np.nan
+    target[generator.random(target.shape) < 0.05] = 0.0
+    assert np.array_equal(
+        no_trade_band(target, band), naive_no_trade_band(target, band), equal_nan=True
+    )

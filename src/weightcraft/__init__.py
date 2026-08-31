@@ -13,6 +13,7 @@ from weightcraft.arrays import (
     Matrix,
     Vector,
 )
+from weightcraft.band import no_trade_band
 from weightcraft.combine import (
     nanmean_stack,
     nanmedian_stack,
@@ -105,6 +106,7 @@ __all__ = [
     "max_drawdown",
     "nanmean_stack",
     "nanmedian_stack",
+    "no_trade_band",
     "normalised_share",
     "normalised_shares",
     "observed_covariance",

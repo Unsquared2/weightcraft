@@ -24,6 +24,7 @@ from canonical import (
     returns_panel,
 )
 from weightcraft.align import align
+from weightcraft.band import no_trade_band
 from weightcraft.combine import (
     nanmean_stack,
     nanmedian_stack,
@@ -143,6 +144,23 @@ def test_trailing_std_scales_with_its_input(factor: float) -> None:
 def test_turnover_scales_with_the_book(factor: float) -> None:
     book: Matrix = np.asarray([[0.2], [0.5], [0.1]])
     assert np.allclose(turnover(book * factor), turnover(book) * factor)
+
+
+@pytest.mark.parametrize("band", [0.05, 0.3, 1.0, 3.0])
+def test_banding_never_trades_more_than_the_raw_target_did(band: float) -> None:
+    # A band can only hold a move open; it can never manufacture a trade the
+    # raw target itself did not already make.
+    target: Matrix = panel(NOISE[:120], SPARSE_NOISE[:120]) * 0.1
+    assert turnover(no_trade_band(target, band)).sum() <= turnover(target).sum()
+
+
+def test_a_band_wide_enough_freezes_the_book_once_entries_stop() -> None:
+    # Once every column has entered, an enormous band must hold every
+    # position at its first level for the rest of the panel.
+    generator = np.random.default_rng(7)
+    target: Matrix = generator.normal(size=(50, 4)) * 0.1
+    held = no_trade_band(target, 1e9)
+    assert np.array_equal(held[10:], np.broadcast_to(held[9], held[10:].shape))
 
 
 @pytest.mark.parametrize("factor", [2.0, 0.1])
