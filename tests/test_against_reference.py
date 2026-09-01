@@ -31,7 +31,7 @@ from weightcraft.metrics import (
     sharpe,
     to_prices,
 )
-from weightcraft.normalize import gross, to_gross
+from weightcraft.normalize import capped, gross, to_gross
 from weightcraft.risk import (
     equal_risk_row,
     inverse_volatility_share,
@@ -132,6 +132,27 @@ def naive_no_trade_band(target: Matrix, band: float) -> Matrix:
                 if gap or abs(after - before) > band * scale:
                     current[column] = after
         out[row] = current
+    return out
+
+
+def naive_capped(
+    values: Matrix, *, max_gross: float | None, max_net: float | None
+) -> Matrix:
+    """Row by row, cell by cell: no broadcasting, no keepdims."""
+    rows, columns = values.shape
+    out = np.zeros((rows, columns))
+    for row in range(rows):
+        cells = [float(v) for v in values[row]]
+        finite = [v for v in cells if np.isfinite(v)]
+        row_gross = sum(abs(v) for v in finite)
+        row_net = sum(finite)
+        scale = 1.0
+        if max_gross is not None and row_gross > 0.0:
+            scale = min(scale, max_gross / row_gross)
+        if max_net is not None and abs(row_net) > 0.0:
+            scale = min(scale, max_net / abs(row_net))
+        for column in range(columns):
+            out[row, column] = cells[column] * scale
     return out
 
 
@@ -454,4 +475,15 @@ def test_no_trade_band_matches_the_scalar_loop(band: float) -> None:
     target[generator.random(target.shape) < 0.05] = 0.0
     assert np.array_equal(
         no_trade_band(target, band), naive_no_trade_band(target, band), equal_nan=True
+    )
+
+
+def test_capped_matches_the_row_by_row_loop() -> None:
+    generator = np.random.default_rng(53)
+    target: Matrix = generator.normal(size=(60, 5)) * 0.3
+    target[generator.random(target.shape) < 0.1] = np.nan
+    assert np.allclose(
+        capped(target, max_gross=0.5, max_net=0.2),
+        naive_capped(target, max_gross=0.5, max_net=0.2),
+        equal_nan=True,
     )

@@ -92,6 +92,49 @@ def to_gross(values: Matrix, target: float) -> Matrix:
     return scaled
 
 
+def net(values: Matrix) -> Matrix:
+    """Per-row net exposure: the signed sum of the weights, skipping missing."""
+    with np.errstate(over="ignore"):
+        total: Matrix = np.nansum(usable(values), axis=1, keepdims=True)
+    return total
+
+
+def exposure_scale(
+    values: Matrix, *, max_gross: float | None = None, max_net: float | None = None
+) -> Matrix:
+    """Per-row multiplier in (0, 1] that brings a row inside both exposure limits.
+
+    A limit of exactly zero is refused like every other positive-only limit
+    here -- `center` is the tool for a book that must be exactly net zero.
+    """
+    if max_gross is not None and max_gross <= 0.0:
+        msg = f"max_gross must be positive, got {max_gross}"
+        raise ValueError(msg)
+    if max_net is not None and max_net <= 0.0:
+        msg = f"max_net must be positive, got {max_net}"
+        raise ValueError(msg)
+    scale: Matrix = np.ones((values.shape[0], 1), dtype=np.float64)
+    if max_gross is not None:
+        current = gross(values)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            scale = np.minimum(scale, np.where(current > 0.0, max_gross / current, 1.0))
+    if max_net is not None:
+        current = np.abs(net(values))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            scale = np.minimum(scale, np.where(current > 0.0, max_net / current, 1.0))
+    return scale
+
+
+def capped(
+    values: Matrix, *, max_gross: float | None = None, max_net: float | None = None
+) -> Matrix:
+    """Each row shrunk uniformly until it satisfies both exposure limits."""
+    scaled: Matrix = values * exposure_scale(
+        values, max_gross=max_gross, max_net=max_net
+    )
+    return scaled
+
+
 def center(values: Matrix) -> Matrix:
     """Subtract each row's mean, forcing zero net exposure per date."""
     with warnings.catch_warnings(), np.errstate(invalid="ignore"):

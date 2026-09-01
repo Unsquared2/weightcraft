@@ -48,9 +48,11 @@ from weightcraft.metrics import (
     to_prices,
 )
 from weightcraft.normalize import (
+    capped,
     center,
     clip_allocation,
     gross,
+    net,
     normalised_share,
     quantize,
     rescaled_to_held_count,
@@ -138,6 +140,16 @@ def test_trailing_std_scales_with_its_input(factor: float) -> None:
         trailing_std(NOISE, 30) * factor,
         equal_nan=True,
     )
+
+
+@pytest.mark.parametrize("factor", [0.25, 4.0])
+def test_capping_commutes_with_a_change_of_units(factor: float) -> None:
+    book: Matrix = np.asarray([[0.6, -0.9, 0.3]])
+    scaled_then_capped = capped(
+        book * factor, max_gross=0.5 * factor, max_net=0.2 * factor
+    )
+    capped_then_scaled = capped(book, max_gross=0.5, max_net=0.2) * factor
+    assert np.allclose(scaled_then_capped, capped_then_scaled)
 
 
 @pytest.mark.parametrize("factor", [2.0, 5.0])
@@ -257,6 +269,36 @@ def test_quantising_a_book_twice_is_the_same_as_once() -> None:
     assert np.allclose(quantize(once, 0.05), once)
 
 
+def test_exposure_capping_a_book_twice_is_the_same_as_once() -> None:
+    book: Matrix = np.asarray([[0.9, -0.9, 0.05]])
+    once = capped(book, max_gross=0.5, max_net=0.2)
+    twice = capped(once, max_gross=0.5, max_net=0.2)
+    assert np.allclose(twice, once)
+
+
+@pytest.mark.parametrize("tighter", [0.4, 0.1])
+def test_a_tighter_limit_never_leaves_a_larger_book(tighter: float) -> None:
+    book: Matrix = np.asarray([[0.9, -0.9, 0.2]])
+    loose = gross(capped(book, max_gross=0.5))
+    tight = gross(capped(book, max_gross=tighter))
+    assert tight[0, 0] <= loose[0, 0]
+
+
+def test_a_gross_target_survives_a_cap_that_does_not_bind() -> None:
+    book: Matrix = np.asarray([[0.2, -0.3, 0.5]])
+    on_target = to_gross(book, 1.0)
+    assert np.allclose(capped(on_target, max_gross=10.0, max_net=10.0), on_target)
+
+
+def test_capping_a_centred_book_leaves_it_centred() -> None:
+    # Centering already forces net to zero, so only the gross term of the cap
+    # can ever bind here.
+    book: Matrix = np.asarray([[0.9, -0.3, -0.6, 1.0]])
+    centred = center(book)
+    result = capped(centred, max_gross=0.5, max_net=0.1)
+    assert net(result)[0, 0] == pytest.approx(0.0, abs=1e-9)
+
+
 def test_standardising_a_row_twice_is_the_same_as_once() -> None:
     values: Matrix = np.asarray([[1.0, 2.0, 5.0, 9.0]])
     once = standardize_rows(values)
@@ -310,6 +352,14 @@ def test_the_order_the_assets_are_listed_in_does_not_change_the_sizing() -> None
     forward = inverse_volatility_share(deviation, side)
     order = [2, 0, 1]
     backward = inverse_volatility_share(deviation[:, order], side[:, order])
+    assert np.allclose(backward, forward[:, order])
+
+
+def test_the_order_the_assets_are_listed_in_does_not_change_a_cap() -> None:
+    book: Matrix = np.asarray([[0.9, -0.9, 0.2]])
+    order = [2, 0, 1]
+    forward = capped(book, max_gross=0.5, max_net=0.1)
+    backward = capped(book[:, order], max_gross=0.5, max_net=0.1)
     assert np.allclose(backward, forward[:, order])
 
 

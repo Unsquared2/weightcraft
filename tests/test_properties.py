@@ -14,7 +14,7 @@ from conftest import panel_frame
 from weightcraft.align import align
 from weightcraft.combine import nanmean_stack, normalised_shares
 from weightcraft.frame import WeightFrame
-from weightcraft.normalize import gross, to_gross, weights_from_bins
+from weightcraft.normalize import capped, gross, net, to_gross, weights_from_bins
 
 if TYPE_CHECKING:
     from weightcraft.arrays import Matrix, Vector
@@ -102,6 +102,32 @@ def test_a_bin_row_is_of_gross_one_and_ranks_the_way_its_bins_do(
         order = np.argsort(source, kind="stable")
         ranked = row[order]
         assert np.all(np.diff(ranked) >= -1e-12)
+
+
+@given(values=_PANEL)
+@settings(max_examples=200)
+def test_a_capped_book_is_always_inside_both_limits(values: Matrix) -> None:
+    result = capped(values, max_gross=0.5, max_net=0.2)
+    row_gross = gross(result)[:, 0]
+    row_net = np.abs(net(result))[:, 0]
+    tolerance = 1e-6
+    assert np.all(row_gross[np.isfinite(row_gross)] <= 0.5 + tolerance)
+    assert np.all(row_net[np.isfinite(row_net)] <= 0.2 + tolerance)
+
+
+@given(values=_PANEL)
+@settings(max_examples=200)
+def test_capping_only_ever_shrinks_a_cell(values: Matrix) -> None:
+    result = capped(values, max_gross=0.5, max_net=0.2)
+    finite = np.isfinite(values)
+    assert np.all(np.abs(result[finite]) <= np.abs(values[finite]) + 1e-9)
+
+
+@given(values=_PANEL)
+@settings(max_examples=200)
+def test_capping_preserves_the_missing_mask_exactly(values: Matrix) -> None:
+    result = capped(values, max_gross=0.5, max_net=0.2)
+    assert np.array_equal(np.isnan(result), np.isnan(values))
 
 
 @given(

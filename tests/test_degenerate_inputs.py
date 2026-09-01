@@ -44,11 +44,14 @@ from weightcraft.metrics import (
     to_prices,
 )
 from weightcraft.normalize import (
+    capped,
     center,
     clip_allocation,
+    exposure_scale,
     fill_missing,
     gross,
     held,
+    net,
     normalised_share,
     quantize,
     rescaled_to_held_count,
@@ -122,6 +125,9 @@ ROW_WISE: dict[str, Callable[[Matrix], Matrix]] = {
     "rolling_mean": lambda v: rolling_mean(v, 2),
     "ewm_mean": lambda v: ewm_mean(v, 2),
     "no_trade_band": lambda v: no_trade_band(v, 0.1),
+    "net": net,
+    "exposure_scale": lambda v: exposure_scale(v, max_gross=0.5, max_net=0.2),
+    "capped": lambda v: capped(v, max_gross=0.5, max_net=0.2),
 }
 
 
@@ -279,6 +285,10 @@ def test_a_field_of_all_missing_shares_falls_back_to_equal() -> None:
         (lambda: clip_allocation(np.zeros((1, 1)), 0.0), "must be positive"),
         (lambda: quantize(np.zeros((1, 1)), -1.0), "must be positive"),
         (lambda: no_trade_band(np.zeros((1, 1)), 0.0), "must be positive"),
+        (lambda: capped(np.zeros((1, 1)), max_gross=0.0), "must be positive"),
+        (lambda: capped(np.zeros((1, 1)), max_gross=-1.0), "must be positive"),
+        (lambda: capped(np.zeros((1, 1)), max_net=0.0), "must be positive"),
+        (lambda: capped(np.zeros((1, 1)), max_net=-1.0), "must be positive"),
         (lambda: top_n_mask(np.zeros((1, 1)), 0), "at least 1"),
         (lambda: align([]), "at least one frame"),
         (
@@ -313,6 +323,30 @@ def test_an_impossible_argument_is_refused_by_name(
 ) -> None:
     with pytest.raises(ValueError, match=match):
         call()
+
+
+def test_an_all_missing_row_stays_all_missing_under_a_cap() -> None:
+    values: Matrix = np.full((1, 3), np.nan)
+    result = capped(values, max_gross=0.5, max_net=0.2)
+    assert np.all(np.isnan(result))
+
+
+def test_a_flat_row_is_left_alone_by_a_cap_rather_than_divided_by_zero() -> None:
+    values: Matrix = np.zeros((1, 3))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = capped(values, max_gross=0.5, max_net=0.2)
+    assert result.tolist() == [[0.0, 0.0, 0.0]]
+
+
+def test_one_infinite_cell_does_not_shrink_the_rest_of_its_row_to_nothing() -> None:
+    # `usable` blanks the infinity rather than letting it dominate the row's
+    # measured gross -- the same guarantee `gross` itself relies on.
+    values: Matrix = np.asarray([[0.5, -0.5, np.inf]])
+    result = capped(values, max_gross=0.5)
+    assert result[0, 0] == pytest.approx(0.25)
+    assert result[0, 1] == pytest.approx(-0.25)
+    assert np.isinf(result[0, 2])
 
 
 def test_only_a_finite_non_zero_weight_counts_as_held() -> None:

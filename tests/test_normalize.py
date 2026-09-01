@@ -4,11 +4,14 @@ import numpy as np
 import pytest
 
 from weightcraft.normalize import (
+    capped,
     center,
     clip_allocation,
+    exposure_scale,
     fill_missing,
     gross,
     held,
+    net,
     normalised_share,
     quantize,
     rescaled_to_held_count,
@@ -83,6 +86,89 @@ def test_rescaling_preserves_the_ratio_between_positions() -> None:
 def test_a_non_positive_gross_target_is_refused() -> None:
     with pytest.raises(ValueError, match="must be positive"):
         to_gross(np.asarray([[1.0]]), 0.0)
+
+
+def test_net_skips_gaps_and_keeps_the_column_shape() -> None:
+    values = np.asarray([[1.0, np.nan, -2.0]])
+    assert net(values).shape == (1, 1)
+    assert net(values).tolist() == [[-1.0]]
+
+
+def test_net_blanks_a_non_finite_cell_where_row_sums_does_not() -> None:
+    values = np.asarray([[1.0, np.inf]])
+    assert np.isinf(row_sums(values)[0, 0])
+    assert net(values).tolist() == [[1.0]]
+
+
+def test_a_long_only_book_has_the_same_net_as_gross() -> None:
+    values = np.asarray([[0.2, 0.5, 0.3]])
+    assert net(values).tolist() == gross(values).tolist()
+
+
+def test_a_row_inside_both_limits_is_returned_untouched() -> None:
+    values = np.asarray([[0.1, -0.2, np.nan]])
+    result = capped(values, max_gross=1.0, max_net=0.5)
+    np.testing.assert_allclose(result, values, equal_nan=True)
+
+
+def test_an_over_gross_row_lands_exactly_on_its_gross_limit() -> None:
+    result = capped(np.asarray([[0.6, -0.6]]), max_gross=0.6)
+    assert gross(result).tolist() == [[pytest.approx(0.6)]]
+
+
+def test_an_over_net_row_lands_exactly_on_its_net_limit() -> None:
+    result = capped(np.asarray([[0.5, 0.5]]), max_net=0.4)
+    assert net(result).tolist() == [[pytest.approx(0.4)]]
+
+
+def test_the_tighter_of_the_two_limits_is_the_one_that_binds() -> None:
+    # Gross 1.0, net 1.0 -- a long-only row where the net limit is looser.
+    loose_net = capped(np.asarray([[0.5, 0.5]]), max_gross=0.4, max_net=10.0)
+    assert gross(loose_net).tolist() == [[pytest.approx(0.4)]]
+    loose_gross = capped(np.asarray([[0.5, 0.5]]), max_gross=10.0, max_net=0.4)
+    assert net(loose_gross).tolist() == [[pytest.approx(0.4)]]
+
+
+def test_shrinking_never_flips_a_sign() -> None:
+    result = capped(np.asarray([[0.9, -0.1]]), max_gross=0.2)
+    assert result[0, 0] >= 0.0
+    assert result[0, 1] <= 0.0
+
+
+def test_shrinking_preserves_the_ratio_between_two_names() -> None:
+    result = capped(np.asarray([[0.2, -0.6]]), max_gross=0.4)
+    assert result[0, 1] / result[0, 0] == pytest.approx(-3.0)
+
+
+def test_naming_no_limit_at_all_is_the_identity() -> None:
+    values = np.asarray([[0.9, -0.9, np.nan]])
+    np.testing.assert_allclose(capped(values), values, equal_nan=True)
+
+
+@pytest.mark.parametrize("field", ["max_gross", "max_net"])
+@pytest.mark.parametrize("limit", [0.0, -1.0])
+def test_a_non_positive_exposure_limit_is_refused(field: str, limit: float) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        capped(np.asarray([[1.0]]), **{field: limit})
+
+
+def test_each_row_is_capped_on_its_own() -> None:
+    result = capped(np.asarray([[0.9, -0.9], [0.1, -0.1]]), max_gross=0.5)
+    assert gross(result)[0].tolist() == [pytest.approx(0.5)]
+    assert result[1].tolist() == pytest.approx([0.1, -0.1])
+
+
+def test_exposure_scale_is_one_wherever_nothing_binds() -> None:
+    values = np.asarray([[0.1, -0.1], [0.9, -0.9]])
+    scale = exposure_scale(values, max_gross=0.2)
+    assert scale.tolist() == [[1.0], [pytest.approx(0.2 / 1.8)]]
+
+
+def test_capped_is_values_times_its_own_exposure_scale() -> None:
+    values = np.asarray([[0.9, -0.9, 0.1]])
+    scale = exposure_scale(values, max_gross=0.5, max_net=0.3)
+    result = capped(values, max_gross=0.5, max_net=0.3)
+    np.testing.assert_allclose(result, values * scale)
 
 
 def test_centering_forces_zero_net_exposure() -> None:
