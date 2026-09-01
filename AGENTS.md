@@ -20,6 +20,10 @@ reason for every rule below.
   `@dataclass(frozen=True, slots=True)`, not a pile of keyword arguments.
 - **Shape in the type.** Use the aliases in `weightcraft.arrays` rather than
   `npt.NDArray`, so a signature says what rank it expects.
+- **Never push to main, never merge a PR.** Open the PR and stop there; a human
+  merges.
+- **TDD, and as little code as possible.** Write the failing test first. The
+  smallest change that passes it beats a general one that might.
 
 ## Quality gates
 
@@ -64,7 +68,9 @@ Prefer none. A comment has to earn its place by saying something the code
 cannot: why a non-obvious choice was made, what breaks without it, a constraint
 imposed from outside. Restating what the next line does is worse than silence.
 
-When one is warranted, make it a single sentence.
+When one is warranted, make it a single, extremely concise sentence — and say
+it once. The same comment sitting in two places is a sign it belongs in
+neither.
 
 ## Docstrings
 
