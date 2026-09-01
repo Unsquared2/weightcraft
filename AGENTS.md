@@ -64,9 +64,10 @@ person does not "fix" it. See the design notes in the README.
 
 ## Comments
 
-Prefer none. A comment has to earn its place by saying something the code
+Only add comments if the code is not self-explanatory. Skip easily-inferrable
+narration. A comment has to earn its place by saying something the code
 cannot: why a non-obvious choice was made, what breaks without it, a constraint
-imposed from outside. Restating what the next line does is worse than silence.
+imposed from outside.
 
 When one is warranted, make it a single, extremely concise sentence — and say
 it once. The same comment sitting in two places is a sign it belongs in
