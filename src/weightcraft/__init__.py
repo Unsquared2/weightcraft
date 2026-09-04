@@ -72,6 +72,7 @@ from weightcraft.risk import (
     trailing_std,
     volatility_target,
 )
+from weightcraft.rolling import bars_since_extreme, partial_rolling_mean, windowed
 from weightcraft.smoothing import ewm_mean, lag_rows, rolling_mean
 
 __all__ = [
@@ -89,6 +90,7 @@ __all__ = [
     "WeightFrame",
     "align",
     "apply_costs",
+    "bars_since_extreme",
     "beta",
     "book_returns",
     "cagr",
@@ -116,6 +118,7 @@ __all__ = [
     "normalised_share",
     "normalised_shares",
     "observed_covariance",
+    "partial_rolling_mean",
     "penalised_for_coverage",
     "project_out_rows",
     "quantize",
@@ -139,4 +142,5 @@ __all__ = [
     "weighted_nanmean_stack",
     "weighted_nanmean_stack_over_time",
     "weights_from_bins",
+    "windowed",
 ]
