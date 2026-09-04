@@ -76,7 +76,9 @@ from weightcraft.rolling import (
     bars_since_extreme,
     partial_rolling_mean,
     partial_rolling_std,
+    rolling_correlation,
     rolling_extreme,
+    rolling_slope,
     windowed,
 )
 from weightcraft.smoothing import ewm_mean, lag_rows, rolling_mean
@@ -131,8 +133,10 @@ __all__ = [
     "quantize",
     "rescaled_to_held_count",
     "residualize_rows",
+    "rolling_correlation",
     "rolling_extreme",
     "rolling_mean",
+    "rolling_slope",
     "rolling_sums",
     "row_counts",
     "row_rank_pct",

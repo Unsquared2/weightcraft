@@ -7,7 +7,9 @@ from weightcraft.rolling import (
     bars_since_extreme,
     partial_rolling_mean,
     partial_rolling_std,
+    rolling_correlation,
     rolling_extreme,
+    rolling_slope,
     windowed,
 )
 
@@ -160,3 +162,80 @@ def test_rolling_extreme_stays_silent_below_min_periods() -> None:
 def test_rolling_extreme_ignores_gaps_in_the_window() -> None:
     highest = rolling_extreme(np.asarray([[1.0], [np.nan], [3.0]]), 3, 1, lowest=False)
     assert highest[2, 0] == pytest.approx(3.0)
+
+
+def test_rolling_correlation_matches_a_naive_windowed_corrcoef() -> None:
+    # A second, deliberately naive implementation -- one `np.corrcoef` call
+    # per window, per column -- rather than the closed-form arithmetic the
+    # kernel itself uses, so agreement is evidence and not a tautology.
+    rng = np.random.default_rng(11)
+    left = rng.normal(size=(30, 2))
+    right = rng.normal(size=(30, 2))
+    window = 5
+    got = rolling_correlation(left, right, window, window)
+    for row in range(window - 1, 30):
+        for col in range(2):
+            a = left[row - window + 1 : row + 1, col]
+            b = right[row - window + 1 : row + 1, col]
+            expected = np.corrcoef(a, b)[0, 1]
+            assert got[row, col] == pytest.approx(expected)
+
+
+def test_rolling_correlation_answers_before_the_window_is_full() -> None:
+    left = np.asarray([[1.0], [2.0], [3.0]])
+    right = np.asarray([[3.0], [2.0], [1.0]])
+    correlation = rolling_correlation(left, right, 10, 3)
+    assert correlation[2, 0] == pytest.approx(-1.0)
+
+
+def test_rolling_correlation_costs_a_pair_its_own_row_not_the_window() -> None:
+    left = np.asarray([[1.0], [np.nan], [3.0], [4.0]])
+    right = np.asarray([[1.0], [2.0], [3.0], [4.0]])
+    correlation = rolling_correlation(left, right, 4, 3)
+    assert np.isfinite(correlation[3, 0])
+
+
+def test_rolling_correlation_refuses_a_zero_min_periods() -> None:
+    with pytest.raises(ValueError, match="min_periods"):
+        rolling_correlation(np.zeros((2, 1)), np.zeros((2, 1)), 2, 0)
+
+
+def test_rolling_slope_matches_a_naive_windowed_polyfit() -> None:
+    rng = np.random.default_rng(12)
+    values = rng.normal(size=(30, 2)).cumsum(axis=0)
+    window = 6
+    got = rolling_slope(values, window, window)
+    for row in range(window - 1, 30):
+        for col in range(2):
+            y = values[row - window + 1 : row + 1, col]
+            x = np.arange(window, dtype=float)
+            expected = np.polyfit(x, y, 1)[0]
+            assert got[row, col] == pytest.approx(expected)
+
+
+def test_rolling_slope_is_positive_on_a_rising_series() -> None:
+    values = np.asarray([[1.0], [2.0], [3.0], [4.0]])
+    slope = rolling_slope(values, 4, 4)
+    assert slope[3, 0] == pytest.approx(1.0)
+
+
+def test_rolling_slope_is_zero_on_a_flat_series() -> None:
+    slope = rolling_slope(np.full((5, 1), 3.0), 5, 5)
+    assert slope[4, 0] == pytest.approx(0.0)
+
+
+def test_rolling_slope_answers_before_the_window_is_full() -> None:
+    values = np.asarray([[1.0], [2.0]])
+    slope = rolling_slope(values, 10, 2)
+    assert slope[1, 0] == pytest.approx(1.0)
+
+
+def test_rolling_slope_ignores_gaps_in_the_window() -> None:
+    values = np.asarray([[1.0], [np.nan], [3.0], [4.0]])
+    slope = rolling_slope(values, 4, 3)
+    assert np.isfinite(slope[3, 0])
+
+
+def test_rolling_slope_refuses_a_zero_min_periods() -> None:
+    with pytest.raises(ValueError, match="min_periods"):
+        rolling_slope(np.zeros((2, 1)), 2, 0)
