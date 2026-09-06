@@ -7,6 +7,7 @@ no global state. Missing data is NaN throughout and is never silently filled.
 from weightcraft.align import AlignedStack, align
 from weightcraft.arrays import (
     BoolMatrix,
+    BoolVector,
     Cube,
     Dates,
     IntVector,
@@ -29,6 +30,18 @@ from weightcraft.cross_section import (
     row_rank_pct,
     standardize_rows,
     top_n_mask,
+)
+from weightcraft.factors import (
+    CANONICAL_FACTORS,
+    CanonicalFactorConfig,
+    DrawdownScaleConfig,
+    asset_returns,
+    canonical_factor_returns,
+    drawdown_scale,
+    factor_cap_blend,
+    factor_capped,
+    factor_exposure,
+    rolling_factor_betas,
 )
 from weightcraft.frame import DATE_COLUMN, WeightFrame
 from weightcraft.metrics import (
@@ -84,12 +97,16 @@ from weightcraft.rolling import (
 from weightcraft.smoothing import ewm_mean, lag_rows, rolling_mean
 
 __all__ = [
+    "CANONICAL_FACTORS",
     "DATE_COLUMN",
     "DEGENERATE_SHARPE",
     "AlignedStack",
     "BoolMatrix",
+    "BoolVector",
+    "CanonicalFactorConfig",
     "Cube",
     "Dates",
+    "DrawdownScaleConfig",
     "EqualRiskConfig",
     "IntVector",
     "Matrix",
@@ -98,20 +115,26 @@ __all__ = [
     "WeightFrame",
     "align",
     "apply_costs",
+    "asset_returns",
     "bars_since_extreme",
     "beta",
     "book_returns",
     "cagr",
+    "canonical_factor_returns",
     "capped",
     "center",
     "clip_allocation",
     "compounded",
     "downside_deviation",
     "drawdown",
+    "drawdown_scale",
     "equal_risk_row",
     "equal_risk_weights",
     "ewm_mean",
     "exposure_scale",
+    "factor_cap_blend",
+    "factor_capped",
+    "factor_exposure",
     "fill_missing",
     "gross",
     "held",
@@ -135,6 +158,7 @@ __all__ = [
     "residualize_rows",
     "rolling_correlation",
     "rolling_extreme",
+    "rolling_factor_betas",
     "rolling_mean",
     "rolling_slope",
     "rolling_sums",
