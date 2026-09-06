@@ -7,6 +7,7 @@ no global state. Missing data is NaN throughout and is never silently filled.
 from weightcraft.align import AlignedStack, align
 from weightcraft.arrays import (
     BoolMatrix,
+    BoolVector,
     Cube,
     Dates,
     IntVector,
@@ -100,6 +101,7 @@ __all__ = [
     "DEGENERATE_SHARPE",
     "AlignedStack",
     "BoolMatrix",
+    "BoolVector",
     "CanonicalFactorConfig",
     "Cube",
     "Dates",
