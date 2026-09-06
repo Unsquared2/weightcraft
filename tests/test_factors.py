@@ -11,6 +11,7 @@ from weightcraft import (
     CANONICAL_FACTORS,
     CanonicalFactorConfig,
     DrawdownScaleConfig,
+    asset_returns,
     canonical_factor_returns,
     drawdown_scale,
     factor_cap_blend,
@@ -776,3 +777,23 @@ def test_an_infinite_market_cap_is_carried_over_rather_than_used() -> None:
     healed = canonical_factor_returns(prices, glitched, config=config)
     np.testing.assert_allclose(clean, healed, equal_nan=True)
     assert np.isfinite(healed[31:, 0]).any(), "the date must survive the glitch"
+
+
+def test_the_factors_are_built_from_the_returns_the_loadings_regress_on() -> None:
+    """One reading of the panel, so the two halves of the model cannot desynchronise.
+
+    A caller computing its own returns to hand to `rolling_factor_betas` gets a
+    regression whose left and right sides came from different arithmetic. Today
+    they agree; a change to either reading is what this catches.
+    """
+    rng = np.random.default_rng(53)
+    prices = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.02, (40, 6)), axis=0)
+    prices[10, 2] = -1.0
+    prices[15, 4] = np.nan
+    returns = asset_returns(prices)
+    assert np.isnan(returns[0]).all(), "the first row has nothing to difference"
+    assert np.isnan(returns[10, 2])
+    assert np.isnan(returns[11, 2])
+    finite = np.isfinite(prices[1:, 0]) & np.isfinite(prices[:-1, 0])
+    expected = prices[1:, 0][finite] / prices[:-1, 0][finite] - 1.0
+    np.testing.assert_allclose(returns[1:, 0][finite], expected)
