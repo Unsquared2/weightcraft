@@ -8,6 +8,7 @@ its name.
 from weightcraft.align import AlignedStack, align, carried
 from weightcraft.arrays import (
     BoolMatrix,
+    BoolVector,
     Cube,
     Dates,
     Duration,
@@ -107,6 +108,7 @@ __all__ = [
     "DEGENERATE_SHARPE",
     "AlignedStack",
     "BoolMatrix",
+    "BoolVector",
     "CanonicalFactorConfig",
     "Cube",
     "Dates",

@@ -16,5 +16,6 @@ type Cube = np.ndarray[tuple[int, int, int], np.dtype[np.float64]]
 type Dates = np.ndarray[tuple[int], np.dtype[np.datetime64[dt.datetime]]]
 type Duration = np.timedelta64[dt.timedelta]
 """A span between two `Dates` entries -- an age bound, a lag, a window."""
+type BoolVector = np.ndarray[tuple[int], np.dtype[np.bool_]]
 type BoolMatrix = np.ndarray[tuple[int, int], np.dtype[np.bool_]]
 type IntVector = np.ndarray[tuple[int], np.dtype[np.intp]]

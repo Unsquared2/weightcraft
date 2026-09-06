@@ -21,6 +21,7 @@ from weightcraft import (
     rolling_factor_betas,
 )
 from weightcraft.cross_section import project_out_rows
+from weightcraft.factors import _momentum_characteristic
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -595,3 +596,183 @@ def test_a_wide_book_lying_in_the_span_of_its_own_factors_cannot_be_hedged() -> 
     assert worst(capped, betas) <= 1.0 + 1e-9
     ratio = capped[0] / weights[0]
     np.testing.assert_allclose(ratio, ratio[0])
+
+
+# --- what a mutation of the model would have to break ---------------------
+
+
+def test_the_momentum_sort_is_formed_before_the_date_it_sorts() -> None:
+    """The subtlest look-ahead here: grading the sort on the return it predicts.
+
+    Tested on the formation alone, because the factor return at a date legitimately
+    moves when that date's prices move -- it *is* that date's return. What may not
+    move is which bucket each name was put in.
+    """
+    rng = np.random.default_rng(17)
+    prices = 100.0 * np.cumprod(1.0 + rng.normal(0.001, 0.03, (120, 12)), axis=0)
+    before = _momentum_characteristic(prices, 5)
+
+    spiked = prices.copy()
+    spiked[-1] *= 5.0
+    after = _momentum_characteristic(spiked, 5)
+    np.testing.assert_array_equal(np.isnan(before), np.isnan(after))
+    np.testing.assert_allclose(before, after, equal_nan=True)
+
+
+def test_the_momentum_sort_does_move_when_an_earlier_price_does() -> None:
+    """The other half: a lag that never reads anything would pass the test above."""
+    rng = np.random.default_rng(17)
+    prices = 100.0 * np.cumprod(1.0 + rng.normal(0.001, 0.03, (120, 12)), axis=0)
+    before = _momentum_characteristic(prices, 5)
+    spiked = prices.copy()
+    spiked[-2] *= 5.0
+    assert not np.allclose(before[-1], _momentum_characteristic(spiked, 5)[-1])
+
+
+def test_the_size_sort_takes_the_outer_thirty_percent() -> None:
+    """Ten assets: the small leg is the smallest three, the big leg the largest."""
+    rng = np.random.default_rng(19)
+    prices = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.02, (40, 10)), axis=0)
+    caps = np.tile(np.linspace(1e6, 1e9, 10), (40, 1))
+    factors = canonical_factor_returns(
+        prices, caps, config=CanonicalFactorConfig(minimum_assets=1)
+    )
+    returns = prices[1:] / prices[:-1] - 1.0
+    weights = caps[:-1]
+    small = (returns[:, :3] * weights[:, :3]).sum(axis=1) / weights[:, :3].sum(axis=1)
+    big = (returns[:, 7:] * weights[:, 7:]).sum(axis=1) / weights[:, 7:].sum(axis=1)
+    np.testing.assert_allclose(factors[1:, 1], small - big, atol=1e-12)
+
+
+def test_a_market_cap_reported_as_zero_takes_the_previous_day_s() -> None:
+    """A glitched cap must not drop the name out of every portfolio for the day.
+
+    Filled twice on purpose: once for a missing cap, once for a non-positive
+    one. Dropping the second fill silently narrows the cross-section.
+    """
+    rng = np.random.default_rng(23)
+    prices = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.02, (40, 8)), axis=0)
+    caps = np.tile(np.linspace(1e6, 1e9, 8), (40, 1))
+    config = CanonicalFactorConfig(minimum_assets=8)
+    clean = canonical_factor_returns(prices, caps, config=config)
+
+    glitched = caps.copy()
+    glitched[20, 3] = 0.0
+    healed = canonical_factor_returns(prices, glitched, config=config)
+    # The carried cap equals the day before's, so the whole row is unchanged and
+    # the date still has its full complement of names.
+    np.testing.assert_allclose(clean, healed, equal_nan=True)
+
+
+def test_the_first_beta_arrives_the_row_after_the_minimum_is_met() -> None:
+    """Pins the off-by-one: `min_periods` rows of history, then a loading."""
+    rng = np.random.default_rng(29)
+    config = CanonicalFactorConfig(beta_window=60, beta_min_periods=10)
+    betas = rolling_factor_betas(
+        rng.normal(0.0, 0.02, (40, 3)), rng.normal(0.0, 0.01, (40, 3)), config=config
+    )
+    answered = np.flatnonzero(np.isfinite(betas[0, :, 0]))
+    assert answered.size, "the panel is long enough to answer somewhere"
+    assert int(answered[0]) == config.beta_min_periods
+
+
+def test_the_backstop_shrink_spares_the_cells_it_cannot_measure() -> None:
+    """The uniform shrink is a risk response, and an unmeasured cell carries no risk.
+
+    Exercises the shrink path rather than the hedge path: a nearly constant row
+    has no direction to hedge along, so the backstop is what caps it -- and the
+    backstop must honour the same promise the hedge does.
+    """
+    loadings: Cube = np.full((3, 1, 5), np.nan)
+    loadings[:, 0, :4] = 1.0
+    weights = book([0.5, 0.5, 0.5, 0.5, 4.0])
+    assert worst(weights, loadings, np.array([0.5, 0.5, 0.5])) > 1.0
+    capped = factor_capped(weights, loadings, np.array([0.5, 0.5, 0.5]))
+    assert capped[0, 4] == pytest.approx(4.0)
+    assert worst(capped, loadings, np.array([0.5, 0.5, 0.5])) <= 1.0 + 1e-9
+
+
+def test_a_book_that_loses_everything_is_not_sized_back_up() -> None:
+    """Past zero the ratio of equity to peak stops being a drawdown.
+
+    Two negatives divide to a positive, so a wiped-out book reads as recovered
+    and comes back at full leverage. It has not recovered; it is gone.
+    """
+    returns: Vector = np.concatenate([np.array([0.0, -1.5, -0.5]), np.zeros(6)])
+    scale = drawdown_scale(returns, DrawdownScaleConfig(window=5, drawdown_limit=0.1))
+    assert scale[0] == pytest.approx(1.0)
+    np.testing.assert_allclose(scale[1:], 0.0)
+
+
+def test_a_nearly_constant_book_is_shrunk_rather_than_blown_up() -> None:
+    """An equal-weight book has no residual: the intercept accounts for all of it.
+
+    So there is no direction to hedge along, and restoring the gross would
+    multiply whatever numerical noise is left by an unbounded factor. It is
+    shrunk instead -- which reaches the limit, and says so by blending zero.
+    """
+    rng = np.random.default_rng(41)
+    assets = 40
+    loadings = cube(
+        np.vstack(
+            [
+                rng.normal(1.0, 0.4, assets),
+                rng.normal(0.0, 0.4, assets),
+                rng.normal(0.0, 0.4, assets),
+            ]
+        )
+    )
+    flat = book([1.0 / assets] * assets)
+    limits: Vector = np.array([0.3, 0.2, 0.2])
+    assert worst(flat, loadings, limits) > 1.0
+    np.testing.assert_allclose(factor_cap_blend(flat, loadings, limits), [[0.0]])
+    capped = factor_capped(flat, loadings, limits)
+    assert worst(capped, loadings, limits) <= 1.0 + 1e-9
+    # Uniformly, so every name keeps its share of the book.
+    ratio = capped[0] / flat[0]
+    np.testing.assert_allclose(ratio, ratio[0])
+
+
+def test_restoring_the_gross_never_stretches_a_row_without_bound() -> None:
+    """The guard is a ratio, so two rows a rounding error apart cannot diverge."""
+    rng = np.random.default_rng(43)
+    assets = 40
+    loadings = cube(
+        np.vstack(
+            [
+                rng.normal(1.0, 0.4, assets),
+                rng.normal(0.0, 0.4, assets),
+                rng.normal(0.0, 0.4, assets),
+            ]
+        )
+    )
+    limits: Vector = np.array([0.3, 0.2, 0.2])
+    flat = np.full(assets, 1.0 / assets)
+    for dispersion in (0.0, 1e-8, 1e-6, 1e-4, 1e-2, 1e-1):
+        raw = np.abs(flat + dispersion * rng.normal(0.0, 1.0, assets))
+        weights = book(raw / raw.sum())
+        capped = factor_capped(weights, loadings, limits)
+        stretch = float(np.abs(capped).max()) / float(np.abs(weights).max())
+        assert stretch <= 4.0 + 1e-9, f"dispersion {dispersion} stretched {stretch}x"
+        assert worst(capped, loadings, limits) <= 1.0 + 1e-9
+
+
+def test_an_infinite_market_cap_is_carried_over_rather_than_used() -> None:
+    """A cap that cannot be a weight is one the model does not have.
+
+    The model this ports ranks an infinity highest, which ranks fine and then
+    overflows the value-weighted sum it is used in, taking the whole date with
+    it. Treated as missing it takes the previous day's cap, like every other
+    unusable reading -- and the date survives.
+    """
+    rng = np.random.default_rng(47)
+    prices = 100.0 * np.cumprod(1.0 + rng.normal(0.0, 0.02, (60, 8)), axis=0)
+    caps = np.tile(np.linspace(1e6, 1e9, 8), (60, 1))
+    config = CanonicalFactorConfig(minimum_assets=8)
+    clean = canonical_factor_returns(prices, caps, config=config)
+
+    glitched = caps.copy()
+    glitched[30, -1] = np.inf
+    healed = canonical_factor_returns(prices, glitched, config=config)
+    np.testing.assert_allclose(clean, healed, equal_nan=True)
+    assert np.isfinite(healed[31:, 0]).any(), "the date must survive the glitch"

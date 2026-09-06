@@ -21,7 +21,7 @@ import numpy as np
 from weightcraft.cross_section import project_out_rows, row_rank_pct
 
 if TYPE_CHECKING:
-    from weightcraft.arrays import BoolMatrix, Cube, Matrix, Vector
+    from weightcraft.arrays import BoolMatrix, BoolVector, Cube, Matrix, Vector
 
 CANONICAL_FACTORS = ("market", "size", "momentum")
 """The three factor columns `canonical_factor_returns` returns, in order."""
@@ -34,12 +34,17 @@ _BETA_CUBE_RANK = 3
 _BISECTION_PASSES = 40
 """Enough to resolve the blend to well past float64's useful precision."""
 
-_MINIMUM_NEUTRAL_GROSS = 1e-6
-"""A projection this small relative to the book is treated as no projection.
+_MAXIMUM_AMPLIFICATION = 4.0
+"""How far restoring the gross may stretch the hedged row before it is refused.
 
-A row with barely more names than regressors leaves a residual that is numerical
-noise; restoring the original gross would multiply it by an arbitrarily large
-factor and hand back a book with no relation to its input.
+Restoring the original gross multiplies the residual by `gross / gross(residual)`,
+so a row whose residual is a sliver of itself comes back as that sliver blown up
+-- a book with no relation to its input. Refusing above this bounds the stretch;
+below it the row is shrunk uniformly instead, which always reaches the limit.
+
+The bound has to be a ratio rather than a floor near zero. A floor of `1e-6`
+admits a millionfold stretch, and puts a discontinuity there: two rows a
+rounding error apart come back one shrunk and one stretched.
 """
 
 
@@ -135,6 +140,17 @@ def _value_weighted_return(
     return out
 
 
+def _momentum_characteristic(prices: Matrix, window: int) -> Matrix:
+    """The momentum sort is formed on prices shifted by one, never on today's.
+
+    Its own function so the lag can be tested on its own. Dropping the shift
+    leaves every other property of the model intact and quietly grades the sort
+    on the very return it is meant to predict -- the subtlest look-ahead this
+    module has, and invisible in anything but a point-in-time test.
+    """
+    return _percentage_change(_shifted(prices, 1), window)
+
+
 def canonical_factor_returns(
     prices: Matrix,
     market_caps: Matrix,
@@ -166,12 +182,16 @@ def canonical_factor_returns(
 
     with np.errstate(invalid="ignore"):
         priced: Matrix = np.where(prices > 0.0, prices, np.nan)
-    # Filled twice: a missing cap takes the previous day's, and one reported as
-    # zero or negative is a glitch that takes it too, rather than dropping the
-    # name out of every value-weighted portfolio for the day.
+    # Filled twice: a missing cap takes the previous day's, and one that is not a
+    # usable weight -- zero, negative, or infinite -- is a glitch that takes it
+    # too, rather than dropping the name out of every value-weighted portfolio
+    # for the day. Infinity is excluded here rather than ranked highest, as the
+    # model this ports does: it ranks fine but overflows the weighted sum it is
+    # then used in, and a cap that cannot be used as a weight is one this does
+    # not have.
     caps = _forward_fill(market_caps)
     with np.errstate(invalid="ignore"):
-        caps = _forward_fill(np.where(caps > 0.0, caps, np.nan))
+        caps = _forward_fill(np.where(np.isfinite(caps) & (caps > 0.0), caps, np.nan))
 
     returns = _percentage_change(priced)
     lagged_caps: Matrix = np.where(held, _shifted(caps, 1), np.nan)
@@ -185,7 +205,7 @@ def canonical_factor_returns(
         returns, lagged_caps, held & (size_rank > 1.0 - _TAIL_FRACTION), 1
     )
 
-    characteristic = _percentage_change(_shifted(priced, 1), settings.momentum_window)
+    characteristic = _momentum_characteristic(priced, settings.momentum_window)
     spreads = []
     for half in (size_rank <= _HALF, size_rank > _HALF):
         eligible = held & half & ~np.isnan(characteristic)
@@ -275,7 +295,6 @@ def rolling_factor_betas(
     window, min_periods = settings.beta_window, settings.beta_min_periods
 
     design: Matrix = np.column_stack([np.ones(dates), factor_returns])
-    terms = design.shape[1]
     usable = np.isfinite(design).all(axis=1)
 
     out: Cube = np.full((factors, dates, assets), np.nan)
@@ -283,8 +302,35 @@ def rolling_factor_betas(
         return out
     reached = np.arange(dates) >= min_periods
 
-    valid = np.isfinite(asset_returns) & usable[:, None]
-    target = np.where(valid, asset_returns, 0.0)
+    # A column block at a time. The cross-product cube is (dates, assets, terms,
+    # terms) and `_trailing_totals` allocates several more of that size, so
+    # solving the whole panel at once costs gigabytes on a real one -- in a
+    # container whose worker count is already capped to police memory.
+    for first in range(0, assets, _ASSET_BLOCK):
+        block = asset_returns[:, first : first + _ASSET_BLOCK]
+        answered = _block_betas(
+            block, design, usable, reached, window=window, min_periods=min_periods
+        )
+        out[:, :, first : first + _ASSET_BLOCK] = np.moveaxis(answered[:, :, 1:], 2, 0)
+    return np.where(np.isfinite(out), out, np.nan)
+
+
+def _block_betas(  # noqa: PLR0913 - one per input the block solve reads
+    block: Matrix,
+    design: Matrix,
+    usable: BoolVector,
+    reached: BoolVector,
+    *,
+    window: int,
+    min_periods: int,
+) -> Cube:
+    """One block's loadings, intercept included: `(dates, assets, terms)`."""
+    dates, assets = block.shape
+    terms = design.shape[1]
+    answered: Cube = np.full((dates, assets, terms), np.nan)
+
+    valid = np.isfinite(block) & usable[:, None]
+    target = np.where(valid, block, 0.0)
     rows = np.where(valid[:, :, None], design[:, None, :], 0.0)
 
     systems = _before(rows[:, :, :, None] * rows[:, :, None, :], window)
@@ -293,7 +339,7 @@ def rolling_factor_betas(
 
     solvable = (observations >= min_periods) & reached[:, None]
     if not solvable.any():
-        return out
+        return answered
     systems, targets = systems[solvable], targets[solvable]
 
     # Unit diagonal before solving: the intercept's column and the factor
@@ -316,13 +362,13 @@ def rolling_factor_betas(
             np.linalg.pinv(scaled[singular]) @ scaled_targets[singular]
         )[:, :, 0]
 
-    answered: Cube = np.full((dates, assets, terms), np.nan)
     answered[solvable] = solved / scale
-    # Drop the intercept and put factors first.
-    return np.moveaxis(answered[:, :, 1:], 2, 0)
+    return answered
 
 
 _SINGULAR_DETERMINANT = 1e-10
+_ASSET_BLOCK = 128
+"""Columns solved at once, bounding the cross-product cube's size."""
 
 
 def _usable(values: Matrix, betas: Cube) -> BoolMatrix:
@@ -404,7 +450,11 @@ def factor_cap_blend(values: Matrix, betas: Cube, limits: Vector) -> Matrix:
             continue
         if held <= 0.0 or not np.isfinite(hedged):
             continue
-        if hedged <= _MINIMUM_NEUTRAL_GROSS * held:
+        if hedged * _MAXIMUM_AMPLIFICATION < held:
+            # Too little of this row survives the projection to hedge with. A
+            # row that is nearly constant is the ordinary case: the intercept
+            # takes all of it, so there is no direction to hedge along and only
+            # a uniform shrink is left.
             continue
         if not np.isfinite(worst) or worst <= 1.0:
             continue
@@ -427,15 +477,16 @@ def _bisect(weights: Vector, residual: Vector, held: float, rho: float) -> float
 def factor_capped(values: Matrix, betas: Cube, limits: Vector) -> Matrix:
     """Each row hedged toward factor-neutral only as far as its limits require.
 
-    The hedged part keeps the gross it arrived with, so the book is reshaped
-    rather than resized. A cell whose loadings are missing is left exactly as it
-    was: it is not measurable against a limit, and dropping it would be a trade
-    nobody asked for.
+    A row that *can* be hedged keeps the gross it arrived with, so the book is
+    reshaped rather than resized. A row that cannot -- one the projection leaves
+    almost nothing of, which a nearly constant row always is -- is shrunk
+    uniformly instead. Both reach the limit; only the first preserves gross, and
+    `factor_cap_blend` says which happened by returning zero for the second.
 
-    A row too thin to hedge is shrunk uniformly instead, which always reaches
-    the limit because every exposure is linear in the weights. That backstop
-    runs over every row, so what this returns is inside the limits whatever the
-    projection managed.
+    A cell whose loadings are missing is left exactly as it was, by both paths:
+    it is not measurable against a limit, it adds nothing to the exposure being
+    capped, and to a live book dropping or resizing it is a trade nobody asked
+    for.
     """
     _checked_betas(values, betas)
     _checked_limits(limits, betas.shape[0])
@@ -464,33 +515,52 @@ def factor_capped(values: Matrix, betas: Cube, limits: Vector) -> Matrix:
         # strength of an overflow.
         breaching = np.isfinite(worst) & (worst > 1.0)
         shrink = np.where(breaching, 1.0 / np.where(breaching, worst, 1.0), 1.0)
-    scaled: Matrix = out * shrink
+    # Only the measured cells. A cell with no loadings adds nothing to the
+    # exposure being shrunk against, so shrinking it would be a trade taken for
+    # no risk reason -- and it is the same cell this function has just promised
+    # to leave alone.
+    scaled: Matrix = np.where(usable, out * shrink, out)
     return scaled
 
 
 def drawdown_scale(book_returns: Vector, config: DrawdownScaleConfig) -> Vector:
     """A per-date multiplier that cuts the book as its drawdown approaches the limit.
 
-    One at the high-water mark, zero once the trailing drawdown reaches
-    `drawdown_limit`, and never above `max_leverage`.
+    `max_leverage` at the high-water mark, zero once the trailing drawdown
+    reaches `drawdown_limit`, and linear between.
+
+    A missing return is read as a flat day rather than voiding the series, which
+    is what lets a book with a gap still be sized. A book whose equity reaches
+    zero or goes through it is cut to nothing and stays there: past that point
+    the ratio of equity to peak is not a drawdown, and a book that has lost more
+    than everything is not one to size back up.
     """
-    compounded = np.nancumprod(1.0 + np.nan_to_num(book_returns, nan=0.0))
-    window = min(config.window, compounded.size)
-    if compounded.size == 0:
+    if book_returns.size == 0:
         empty: Vector = np.zeros(0, dtype=np.float64)
         return empty
+    compounded = np.cumprod(1.0 + np.nan_to_num(book_returns, nan=0.0))
+    window = min(config.window, compounded.size)
+    # `-inf` padding, so the first rows take the maximum over what exists rather
+    # than needing a full window -- the expanding peak a book has before it has
+    # `window` of history.
     padded = np.concatenate(
         [np.full(window - 1, -np.inf, dtype=np.float64), compounded]
     )
-    peaks = np.maximum.accumulate(
+    peak = np.maximum.accumulate(
         np.lib.stride_tricks.sliding_window_view(padded, window), axis=-1
     )[:, -1]
-    running = np.maximum.accumulate(compounded)
-    peak = np.where(np.isfinite(peaks), np.maximum(peaks, compounded), running)
     with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        # `peak` includes the current row, so `fall` is never positive and only
+        # the floor can bind.
         fall = compounded / peak - 1.0
-        scale = (np.clip(fall / config.drawdown_limit, -1.0, 0.0) + 1.0) * (
+        scale = (np.maximum(fall / config.drawdown_limit, -1.0) + 1.0) * (
             config.max_leverage
         )
-    clipped: Vector = np.clip(np.nan_to_num(scale, nan=0.0), 0.0, config.max_leverage)
+    # Once equity has been wiped out the arithmetic above stops meaning
+    # anything -- two negatives divide to a positive, and the book reads as
+    # recovered. It is not recovered; it is gone.
+    wiped = np.minimum.accumulate(compounded) <= 0.0
+    clipped: Vector = np.where(
+        wiped, 0.0, np.clip(np.nan_to_num(scale, nan=0.0), 0.0, config.max_leverage)
+    )
     return clipped
