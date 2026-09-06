@@ -140,6 +140,22 @@ def _value_weighted_return(
     return out
 
 
+def asset_returns(prices: Matrix) -> Matrix:
+    """Row-over-row returns of a price panel, on the model's own reading of it.
+
+    The same series `canonical_factor_returns` builds its factors from, exposed
+    because the loadings have to be regressed on *these* returns and not on a
+    caller's own arithmetic -- two readings of one panel that agree today are
+    two that can quietly stop agreeing.
+
+    A non-positive price is not a price: it is missing, and so is the return
+    either side of it.
+    """
+    with np.errstate(invalid="ignore"):
+        priced: Matrix = np.where(prices > 0.0, prices, np.nan)
+    return _percentage_change(priced)
+
+
 def _momentum_characteristic(prices: Matrix, window: int) -> Matrix:
     """The momentum sort is formed on prices shifted by one, never on today's.
 
@@ -193,7 +209,7 @@ def canonical_factor_returns(
     with np.errstate(invalid="ignore"):
         caps = _forward_fill(np.where(np.isfinite(caps) & (caps > 0.0), caps, np.nan))
 
-    returns = _percentage_change(priced)
+    returns = asset_returns(prices)
     lagged_caps: Matrix = np.where(held, _shifted(caps, 1), np.nan)
 
     market = _value_weighted_return(returns, lagged_caps, held, settings.minimum_assets)
