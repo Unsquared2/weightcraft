@@ -13,11 +13,12 @@ from hypothesis.extra.numpy import array_shapes, arrays
 from conftest import panel_frame
 from weightcraft.align import align
 from weightcraft.combine import nanmean_stack, normalised_shares
+from weightcraft.factors import factor_cap_blend, factor_capped, factor_exposure
 from weightcraft.frame import WeightFrame
 from weightcraft.normalize import capped, gross, net, to_gross, weights_from_bins
 
 if TYPE_CHECKING:
-    from weightcraft.arrays import Matrix, Vector
+    from weightcraft.arrays import Cube, Matrix, Vector
 
 # NaN and inf are generated deliberately: a gap is the ordinary case here, and
 # the reductions disagreed about infinities until a review caught it.
@@ -147,3 +148,59 @@ def test_normalised_shares_always_sum_to_one(raw: Vector) -> None:
 def test_a_polars_round_trip_never_changes_a_frame(values: Matrix) -> None:
     original = panel_frame(values)
     assert WeightFrame.from_polars(original.to_polars()) == original
+
+
+_FACTOR_CELLS = st.one_of(
+    st.floats(min_value=-1e4, max_value=1e4, allow_nan=False, width=32),
+    st.just(np.nan),
+    st.sampled_from([np.inf, -np.inf]),
+)
+
+
+@st.composite
+def _book_and_betas(draw: st.DrawFn) -> tuple[Matrix, Cube]:
+    """A book and a loadings cube on the same grid, gaps and infinities included."""
+    dates = draw(st.integers(min_value=0, max_value=4))
+    assets = draw(st.integers(min_value=0, max_value=8))
+    factors = draw(st.integers(min_value=1, max_value=3))
+    shape = (dates, assets)
+    values: Matrix = draw(arrays(np.float64, shape, elements=_FACTOR_CELLS))
+    betas: Cube = draw(arrays(np.float64, (factors, *shape), elements=_FACTOR_CELLS))
+    return values, betas
+
+
+@given(pair=_book_and_betas())
+@settings(max_examples=300, deadline=None)
+def test_factor_capped_never_leaves_a_measurable_breach(
+    pair: tuple[Matrix, Cube],
+) -> None:
+    """Whatever comes in, what comes out is inside the limits or unmeasurable."""
+    values, betas = pair
+    limits: Vector = np.full(betas.shape[0], 0.15)
+    capped_book = factor_capped(values, betas, limits)
+    assert capped_book.shape == values.shape
+    exposures = factor_exposure(capped_book, betas)
+    measurable = np.isfinite(exposures)
+    assert np.all(np.abs(exposures[measurable]) <= 0.15 + 1e-6)
+
+
+@given(pair=_book_and_betas())
+@settings(max_examples=300, deadline=None)
+def test_factor_capped_never_invents_or_drops_a_position(
+    pair: tuple[Matrix, Cube],
+) -> None:
+    """A cell that was missing stays missing, and one that was held stays held."""
+    values, betas = pair
+    limits: Vector = np.full(betas.shape[0], 0.15)
+    capped_book = factor_capped(values, betas, limits)
+    np.testing.assert_array_equal(np.isnan(capped_book), np.isnan(values))
+
+
+@given(pair=_book_and_betas())
+@settings(max_examples=300, deadline=None)
+def test_the_blend_fraction_stays_a_fraction(pair: tuple[Matrix, Cube]) -> None:
+    values, betas = pair
+    limits: Vector = np.full(betas.shape[0], 0.15)
+    blend = factor_cap_blend(values, betas, limits)
+    assert blend.shape == (values.shape[0], 1)
+    assert np.all((blend >= 0.0) & (blend <= 1.0))
