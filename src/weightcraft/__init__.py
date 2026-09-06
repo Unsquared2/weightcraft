@@ -37,6 +37,17 @@ from weightcraft.cross_section import (
     standardize_rows,
     top_n_mask,
 )
+from weightcraft.factors import (
+    CANONICAL_FACTORS,
+    CanonicalFactorConfig,
+    DrawdownScaleConfig,
+    canonical_factor_returns,
+    drawdown_scale,
+    factor_cap_blend,
+    factor_capped,
+    factor_exposure,
+    rolling_factor_betas,
+)
 from weightcraft.frame import DATE_COLUMN, WeightFrame
 from weightcraft.metrics import (
     DEGENERATE_SHARPE,
@@ -91,12 +102,15 @@ from weightcraft.rolling import (
 from weightcraft.smoothing import ewm_mean, lag_rows, rolling_mean
 
 __all__ = [
+    "CANONICAL_FACTORS",
     "DATE_COLUMN",
     "DEGENERATE_SHARPE",
     "AlignedStack",
     "BoolMatrix",
+    "CanonicalFactorConfig",
     "Cube",
     "Dates",
+    "DrawdownScaleConfig",
     "Duration",
     "EqualRiskConfig",
     "IntVector",
@@ -110,6 +124,7 @@ __all__ = [
     "beta",
     "book_returns",
     "cagr",
+    "canonical_factor_returns",
     "capped",
     "carried",
     "center",
@@ -117,10 +132,14 @@ __all__ = [
     "compounded",
     "downside_deviation",
     "drawdown",
+    "drawdown_scale",
     "equal_risk_row",
     "equal_risk_weights",
     "ewm_mean",
     "exposure_scale",
+    "factor_cap_blend",
+    "factor_capped",
+    "factor_exposure",
     "fill_missing",
     "gross",
     "held",
@@ -146,6 +165,7 @@ __all__ = [
     "residualize_rows",
     "rolling_correlation",
     "rolling_extreme",
+    "rolling_factor_betas",
     "rolling_mean",
     "rolling_slope",
     "rolling_sums",
