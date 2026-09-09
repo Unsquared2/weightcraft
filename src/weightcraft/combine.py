@@ -37,6 +37,12 @@ def _usable(stack: Cube) -> Cube:
     return blanked
 
 
+def _zero_filled(stack: Cube) -> Cube:
+    """The stack with every missing cell at zero, `present` deciding what is missing."""
+    filled: Cube = np.where(present(stack), stack, 0.0)
+    return filled
+
+
 def _validated_shares(shares: Vector | Matrix, expected: tuple[int, ...]) -> None:
     if shares.shape != expected:
         msg = f"expected shares of shape {expected}, got {shares.shape}"
@@ -76,6 +82,34 @@ def weighted_nanmean_stack(stack: Cube, shares: Vector) -> Matrix:
     denominator = weights.sum(axis=0)
     with np.errstate(invalid="ignore", divide="ignore"):
         combined: Matrix = np.where(denominator > 0.0, numerator / denominator, np.nan)
+    return combined
+
+
+def mean_stack(stack: Cube) -> Matrix:
+    """Mean across frames per cell, a missing cell counted as flat rather than skipped.
+
+    Not `numpy.mean`'s reading, which propagates a NaN: here a missing cell is
+    a frame holding nothing, so it stays in the denominator at zero and an
+    all-missing cell comes back flat. `nanmean_stack` is the other reading.
+    """
+    with warnings.catch_warnings(), np.errstate(over="ignore", invalid="ignore"):
+        warnings.filterwarnings("ignore", message=_EMPTY_MEAN_WARNING)
+        mean: Matrix = _zero_filled(stack).mean(axis=0)
+    return mean
+
+
+def weighted_mean_stack(stack: Cube, shares: Vector) -> Matrix:
+    """`mean_stack` with a share per frame: a missing cell keeps its share, at zero.
+
+    `weighted_nanmean_stack` is the other reading, where that share leaves the
+    denominator with the cell.
+    """
+    _validated_shares(shares, (stack.shape[0],))
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        numerator = (_zero_filled(stack) * shares[:, None, None]).sum(axis=0)
+        # Shares summing to zero leave nothing to divide by, and so does a
+        # stack of no frames: both come back missing, as the `nan*` pair does.
+        combined: Matrix = numerator / float(shares.sum())
     return combined
 
 

@@ -6,9 +6,11 @@ import pytest
 from conftest import dates, frame
 from weightcraft.align import align
 from weightcraft.combine import (
+    mean_stack,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
+    weighted_mean_stack,
     weighted_nanmean_stack,
     weighted_nanmean_stack_over_time,
 )
@@ -130,3 +132,81 @@ def test_shares_normalise_to_one_and_fall_back_to_equal() -> None:
     assert normalised_shares(np.asarray([1.0, 3.0])).tolist() == [0.25, 0.75]
     assert normalised_shares(np.asarray([0.0, 0.0])).tolist() == [0.5, 0.5]
     assert normalised_shares(np.asarray([np.inf, 1.0])).tolist() == [0.0, 1.0]
+
+
+def test_the_mean_counts_a_silent_source_as_flat_rather_than_skipping_it() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[np.nan]])])
+    # The counterpart to `test_the_mean_skips_a_source_that_is_silent_on_a_cell`
+    # above: the silent source is counted at zero rather than removed, so the
+    # mean is halved rather than left where the source that spoke set it.
+    assert nanmean_stack(stack.values).tolist() == [[1.0]]
+    assert mean_stack(stack.values).tolist() == [[0.5]]
+
+
+def test_the_mean_reads_missing_the_way_every_reduction_does() -> None:
+    """`present` calls an infinity broken, so it counts as flat, not as large."""
+    stack = align([frame(("BTC",), [[np.inf]]), frame(("BTC",), [[1.0]])])
+    assert mean_stack(stack.values).tolist() == [[0.5]]
+
+
+def test_the_two_means_agree_when_no_cell_is_missing() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[-3.0]])])
+    assert mean_stack(stack.values).tolist() == nanmean_stack(stack.values).tolist()
+
+
+def test_the_mean_fills_a_cell_no_source_covered() -> None:
+    stack = align([frame(("BTC", "ETH"), [[1.0, np.nan]])])
+    assert np.isnan(nanmean_stack(stack.values))[0, 1]
+    assert mean_stack(stack.values).tolist() == [[1.0, 0.0]]
+
+
+def test_a_weighted_mean_keeps_a_gap_in_the_denominator() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[np.nan]])])
+    shares = np.asarray([0.25, 0.75])
+    # The counterpart to `test_a_weighted_mean_drops_a_gap_from_both_sides`:
+    # the silent source keeps its 0.75 of the denominator, at zero.
+    assert weighted_nanmean_stack(stack.values, shares).tolist() == [[1.0]]
+    assert weighted_mean_stack(stack.values, shares).tolist() == [[0.25]]
+
+
+def test_a_weighted_mean_of_equal_shares_is_the_plain_one() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[np.nan]])])
+    shares = np.asarray([0.5, 0.5])
+    assert (
+        weighted_mean_stack(stack.values, shares).tolist()
+        == mean_stack(stack.values).tolist()
+    )
+
+
+def test_a_weighted_mean_refuses_the_same_bad_shares_the_skipping_one_does() -> None:
+    stack = align([frame(("BTC",), [[1.0]])])
+    with pytest.raises(ValueError, match="expected shares of shape"):
+        weighted_mean_stack(stack.values, np.asarray([0.5, 0.5]))
+    with pytest.raises(ValueError, match="non-negative"):
+        weighted_mean_stack(stack.values, np.asarray([-1.0]))
+
+
+def test_neither_mean_ever_changes_a_cell_that_was_present() -> None:
+    stack = align([frame(("BTC", "ETH"), [[0.4, np.nan]])])
+    assert mean_stack(stack.values)[0, 0] == 0.4
+    assert weighted_mean_stack(stack.values, np.asarray([1.0]))[0, 0] == 0.4
+
+
+def test_a_weighted_mean_with_no_share_anywhere_is_missing_not_flat() -> None:
+    """Filling is about a silent *cell*; a stack nobody weights says nothing.
+
+    The gap-free guarantee holds given a frame carrying a positive share --
+    degenerate shares fall back to what the `nan*` pair answers, so the two
+    do not disagree about a case neither can size.
+    """
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[3.0]])])
+    zero = np.zeros(2)
+    assert np.isnan(weighted_nanmean_stack(stack.values, zero)).all()
+    assert np.isnan(weighted_mean_stack(stack.values, zero)).all()
+
+
+def test_scaling_every_share_by_the_same_amount_is_the_same_mean() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[np.nan]])])
+    plain = weighted_mean_stack(stack.values, np.asarray([3.0, 1.0]))
+    scaled = weighted_mean_stack(stack.values, np.asarray([300.0, 100.0]))
+    assert plain.tolist() == scaled.tolist()

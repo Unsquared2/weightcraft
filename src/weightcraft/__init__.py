@@ -1,7 +1,8 @@
 """Pure portfolio-construction numerics.
 
 Every function here is a function of arrays: no I/O, no configuration lookup,
-no global state. Missing data is NaN throughout and is never silently filled.
+no global state. Missing data is NaN, and a function that fills it says so in
+its name.
 """
 
 from weightcraft.align import AlignedStack, align
@@ -15,9 +16,11 @@ from weightcraft.arrays import (
 )
 from weightcraft.band import no_trade_band
 from weightcraft.combine import (
+    mean_stack,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
+    weighted_mean_stack,
     weighted_nanmean_stack,
     weighted_nanmean_stack_over_time,
 )
@@ -119,6 +122,7 @@ __all__ = [
     "lag_rows",
     "lagged",
     "max_drawdown",
+    "mean_stack",
     "nanmean_stack",
     "nanmedian_stack",
     "net",
@@ -151,6 +155,7 @@ __all__ = [
     "trailing_std",
     "turnover",
     "volatility_target",
+    "weighted_mean_stack",
     "weighted_nanmean_stack",
     "weighted_nanmean_stack_over_time",
     "weights_from_bins",

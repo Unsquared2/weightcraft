@@ -18,9 +18,11 @@ from canonical import EVERY_SERIES, panel
 from weightcraft.align import align
 from weightcraft.band import no_trade_band
 from weightcraft.combine import (
+    mean_stack,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
+    weighted_mean_stack,
     weighted_nanmean_stack,
     weighted_nanmean_stack_over_time,
 )
@@ -79,7 +81,7 @@ from weightcraft.smoothing import ewm_mean, lag_rows, rolling_mean
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from weightcraft.arrays import Matrix, Vector
+    from weightcraft.arrays import Cube, Matrix, Vector
 
 SERIES = pytest.mark.parametrize(
     "series", EVERY_SERIES.values(), ids=list(EVERY_SERIES.keys())
@@ -168,6 +170,13 @@ def test_a_stack_of_one_degenerate_panel_reduces_without_complaint(
             weighted_nanmean_stack_over_time(stack, np.ones((1, values.shape[0]))).shape
             == values.shape
         )
+        filled = mean_stack(stack)
+        weighted = weighted_mean_stack(stack, np.asarray([1.0]))
+        assert filled.shape == values.shape
+        # The point of the filling pair: whatever went in, nothing missing
+        # comes out.
+        assert bool(np.isfinite(filled).all())
+        assert bool(np.isfinite(weighted).all())
 
 
 @SERIES
@@ -311,6 +320,10 @@ def test_a_field_of_all_missing_shares_falls_back_to_equal() -> None:
             "non-negative",
         ),
         (
+            lambda: weighted_mean_stack(np.zeros((2, 1, 1)), np.asarray([1.0])),
+            "expected shares of shape",
+        ),
+        (
             lambda: weighted_nanmean_stack_over_time(
                 np.zeros((2, 1, 1)), np.asarray([[np.nan], [1.0]])
             ),
@@ -382,3 +395,21 @@ def test_a_gap_long_enough_to_underflow_does_not_blank_the_column() -> None:
 def test_a_covariance_over_a_window_too_short_to_have_one_is_zero() -> None:
     assert observed_covariance(np.zeros((1, 3))).tolist() == [[0.0] * 3] * 3
     assert observed_covariance(np.zeros((0, 2))).tolist() == [[0.0, 0.0]] * 2
+
+
+def test_a_filling_reduction_of_no_frames_at_all_is_quiet() -> None:
+    """`nanmean_stack` already swallows the empty-slice warning; so must these."""
+    empty: Cube = np.full((0, 2, 2), np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert np.isnan(mean_stack(empty)).all()
+        assert np.isnan(weighted_mean_stack(empty, np.zeros(0))).all()
+
+
+def test_a_filling_reduction_of_an_overflowing_panel_is_quiet() -> None:
+    """An overflow is `gross`'s reading -- infinite, not a warning in a loop."""
+    huge: Cube = np.full((2, 1, 1), 1e308)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert np.isinf(mean_stack(huge)).all()
+        assert np.isinf(weighted_mean_stack(huge, np.asarray([1.0, 1.0]))).all()
