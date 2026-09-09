@@ -26,10 +26,11 @@ from canonical import (
 from weightcraft.align import align
 from weightcraft.band import no_trade_band
 from weightcraft.combine import (
+    mean_stack,
     nanmean_stack,
     nanmedian_stack,
+    weighted_mean_stack,
     weighted_nanmean_stack,
-    zero_filled_stack,
 )
 from weightcraft.costs import apply_costs, book_returns, lagged, turnover
 from weightcraft.cross_section import (
@@ -382,39 +383,43 @@ def test_the_order_the_frames_arrive_in_does_not_change_the_mean() -> None:
     assert np.array_equal(forward, backward, equal_nan=True)
 
 
-def test_zero_filling_dilutes_the_mean_by_how_many_frames_were_present() -> None:
-    """The whole difference in one line: `skipped * present / frames`."""
+def test_the_mean_is_the_skipping_one_diluted_by_how_many_frames_were_present() -> None:
+    """The whole difference between the two in one line."""
     stack = np.stack([panel(MIXED), panel(SPARSE_NOISE[: MIXED.size])])
     skipped = nanmean_stack(stack)
-    filled = nanmean_stack(zero_filled_stack(stack))
     share = np.isfinite(stack).sum(axis=0) / stack.shape[0]
-    assert np.allclose(filled, np.where(np.isfinite(skipped), skipped, 0.0) * share)
-
-
-def test_a_zero_filled_mean_never_reaches_further_from_flat_than_the_skipping_one() -> (
-    None
-):
-    stack = np.stack([panel(MIXED), panel(SPARSE_NOISE[: MIXED.size])])
-    skipped = nanmean_stack(stack)
-    filled = nanmean_stack(zero_filled_stack(stack))
-    assert np.all(
-        np.abs(filled) <= np.abs(np.where(np.isfinite(skipped), skipped, 0.0)) + 1e-12
+    assert np.allclose(
+        mean_stack(stack), np.where(np.isfinite(skipped), skipped, 0.0) * share
     )
 
 
-def test_zero_filling_is_idempotent() -> None:
+def test_the_mean_never_reaches_further_from_flat_than_the_skipping_one() -> None:
     stack = np.stack([panel(MIXED), panel(SPARSE_NOISE[: MIXED.size])])
-    once = zero_filled_stack(stack)
-    assert np.array_equal(zero_filled_stack(once), once)
+    skipped = np.where(np.isfinite(nanmean_stack(stack)), nanmean_stack(stack), 0.0)
+    assert np.all(np.abs(mean_stack(stack)) <= np.abs(skipped) + 1e-12)
 
 
-def test_the_order_the_frames_arrive_in_does_not_change_a_zero_filled_mean() -> None:
+def test_the_mean_is_the_weighted_mean_of_equal_shares() -> None:
+    stack = np.stack([panel(MIXED), panel(SPARSE_NOISE[: MIXED.size])])
+    shares: Vector = np.asarray([0.5, 0.5])
+    assert np.allclose(mean_stack(stack), weighted_mean_stack(stack, shares))
+
+
+def test_giving_one_source_the_whole_share_returns_that_source_filled() -> None:
+    """Unlike the skipping one, which hands back that source's gaps untouched."""
+    stack = np.stack([panel(MIXED), panel(FLAT_LINE)])
+    shares: Vector = np.asarray([1.0, 0.0])
+    filled = np.where(np.isfinite(panel(MIXED)), panel(MIXED), 0.0)
+    assert np.allclose(weighted_mean_stack(stack, shares), filled)
+
+
+def test_the_order_the_frames_arrive_in_does_not_change_the_filled_mean() -> None:
     first = WeightFrame.from_rows(
         ["2026-01-01"], ("A", "B"), np.asarray([[1.0, np.nan]])
     )
     second = WeightFrame.from_rows(["2026-01-01"], ("B", "C"), np.asarray([[2.0, 3.0]]))
-    forward = nanmean_stack(zero_filled_stack(align([first, second]).values))
-    backward = nanmean_stack(zero_filled_stack(align([second, first]).values))
+    forward = mean_stack(align([first, second]).values)
+    backward = mean_stack(align([second, first]).values)
     assert np.array_equal(forward, backward)
 
 

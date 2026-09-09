@@ -14,8 +14,11 @@ reason for every rule below.
   A function that reads a file or an environment variable does not belong here.
 - **No dependency on any consumer.** Nothing in this repo may import, or know
   the name of, anything that calls it.
-- **Missing is NaN and stays NaN.** Never `nan_to_num` a caller's data on their
-  behalf. NaN positions are compared exactly in tests, never through a fill.
+- **A fill is named, never silent.** Missing is NaN on the way in, and a
+  function that treats it as anything else says so in its name and its
+  docstring — `mean_stack` fills, `nanmean_stack` skips, and a caller picks.
+  Nothing fills as a side effect of doing something else. In tests, NaN
+  positions are still compared exactly rather than through a fill.
 - **Frozen dataclasses.** Anything with more than a couple of knobs is a
   `@dataclass(frozen=True, slots=True)`, not a pile of keyword arguments.
 - **Shape in the type.** Use the aliases in `weightcraft.arrays` rather than
