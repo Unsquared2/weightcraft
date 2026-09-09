@@ -29,6 +29,7 @@ from weightcraft.combine import (
     nanmean_stack,
     nanmedian_stack,
     weighted_nanmean_stack,
+    zero_filled_stack,
 )
 from weightcraft.costs import apply_costs, book_returns, lagged, turnover
 from weightcraft.cross_section import (
@@ -379,6 +380,42 @@ def test_the_order_the_frames_arrive_in_does_not_change_the_mean() -> None:
     forward = nanmean_stack(align([first, second]).values)
     backward = nanmean_stack(align([second, first]).values)
     assert np.array_equal(forward, backward, equal_nan=True)
+
+
+def test_zero_filling_dilutes_the_mean_by_how_many_frames_were_present() -> None:
+    """The whole difference in one line: `skipped * present / frames`."""
+    stack = np.stack([panel(MIXED), panel(SPARSE_NOISE[: MIXED.size])])
+    skipped = nanmean_stack(stack)
+    filled = nanmean_stack(zero_filled_stack(stack))
+    share = np.isfinite(stack).sum(axis=0) / stack.shape[0]
+    assert np.allclose(filled, np.where(np.isfinite(skipped), skipped, 0.0) * share)
+
+
+def test_a_zero_filled_mean_never_reaches_further_from_flat_than_the_skipping_one() -> (
+    None
+):
+    stack = np.stack([panel(MIXED), panel(SPARSE_NOISE[: MIXED.size])])
+    skipped = nanmean_stack(stack)
+    filled = nanmean_stack(zero_filled_stack(stack))
+    assert np.all(
+        np.abs(filled) <= np.abs(np.where(np.isfinite(skipped), skipped, 0.0)) + 1e-12
+    )
+
+
+def test_zero_filling_is_idempotent() -> None:
+    stack = np.stack([panel(MIXED), panel(SPARSE_NOISE[: MIXED.size])])
+    once = zero_filled_stack(stack)
+    assert np.array_equal(zero_filled_stack(once), once)
+
+
+def test_the_order_the_frames_arrive_in_does_not_change_a_zero_filled_mean() -> None:
+    first = WeightFrame.from_rows(
+        ["2026-01-01"], ("A", "B"), np.asarray([[1.0, np.nan]])
+    )
+    second = WeightFrame.from_rows(["2026-01-01"], ("B", "C"), np.asarray([[2.0, 3.0]]))
+    forward = nanmean_stack(zero_filled_stack(align([first, second]).values))
+    backward = nanmean_stack(zero_filled_stack(align([second, first]).values))
+    assert np.array_equal(forward, backward)
 
 
 # --------------------------------------------------------------------------

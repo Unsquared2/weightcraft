@@ -20,6 +20,7 @@ from weightcraft.combine import (
     normalised_shares,
     weighted_nanmean_stack,
     weighted_nanmean_stack_over_time,
+    zero_filled_stack,
 )
 from weightcraft.costs import apply_costs, book_returns, lagged, turnover
 from weightcraft.cross_section import (
@@ -155,4 +156,5 @@ __all__ = [
     "weighted_nanmean_stack_over_time",
     "weights_from_bins",
     "windowed",
+    "zero_filled_stack",
 ]

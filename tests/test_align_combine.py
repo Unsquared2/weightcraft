@@ -11,6 +11,7 @@ from weightcraft.combine import (
     normalised_shares,
     weighted_nanmean_stack,
     weighted_nanmean_stack_over_time,
+    zero_filled_stack,
 )
 from weightcraft.frame import WeightFrame
 
@@ -130,3 +131,46 @@ def test_shares_normalise_to_one_and_fall_back_to_equal() -> None:
     assert normalised_shares(np.asarray([1.0, 3.0])).tolist() == [0.25, 0.75]
     assert normalised_shares(np.asarray([0.0, 0.0])).tolist() == [0.5, 0.5]
     assert normalised_shares(np.asarray([np.inf, 1.0])).tolist() == [0.0, 1.0]
+
+
+def test_zero_filling_puts_a_silent_source_back_in_the_denominator() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[np.nan]])])
+    # The counterpart to `test_a_weighted_mean_drops_a_gap_from_both_sides`:
+    # the silent source is counted as flat rather than removed, so the mean
+    # is halved rather than left at the level the source that spoke set.
+    assert nanmean_stack(stack.values).tolist() == [[1.0]]
+    assert nanmean_stack(zero_filled_stack(stack.values)).tolist() == [[0.5]]
+
+
+def test_zero_filling_reads_missing_the_way_every_reduction_does() -> None:
+    """`present` calls an infinity broken, so it is filled like a gap is."""
+    stack = align([frame(("BTC",), [[np.inf]]), frame(("BTC",), [[1.0]])])
+    assert zero_filled_stack(stack.values).tolist() == [[[0.0]], [[1.0]]]
+
+
+def test_zero_filling_leaves_a_stack_with_nothing_missing_alone() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[-3.0]])])
+    assert np.array_equal(zero_filled_stack(stack.values), stack.values)
+
+
+def test_zero_filling_fills_a_cell_no_source_covered() -> None:
+    stack = align([frame(("BTC", "ETH"), [[1.0, np.nan]])])
+    assert np.isnan(nanmean_stack(stack.values))[0, 1]
+    assert nanmean_stack(zero_filled_stack(stack.values)).tolist() == [[1.0, 0.0]]
+
+
+def test_a_zero_filled_weighted_mean_divides_by_every_share() -> None:
+    stack = align([frame(("BTC",), [[1.0]]), frame(("BTC",), [[np.nan]])])
+    shares = np.asarray([0.25, 0.75])
+    assert weighted_nanmean_stack(stack.values, shares).tolist() == [[1.0]]
+    assert weighted_nanmean_stack(zero_filled_stack(stack.values), shares).tolist() == [
+        [0.25]
+    ]
+
+
+def test_zero_filling_never_changes_a_cell_that_was_present() -> None:
+    stack = align([frame(("BTC", "ETH"), [[0.1, np.nan], [-0.2, 0.3]])])
+    filled = zero_filled_stack(stack.values)
+    seen = np.isfinite(stack.values)
+    assert np.array_equal(filled[seen], stack.values[seen])
+    assert np.array_equal(filled[~seen], np.zeros(int((~seen).sum())))

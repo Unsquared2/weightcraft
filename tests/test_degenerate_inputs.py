@@ -23,6 +23,7 @@ from weightcraft.combine import (
     normalised_shares,
     weighted_nanmean_stack,
     weighted_nanmean_stack_over_time,
+    zero_filled_stack,
 )
 from weightcraft.costs import apply_costs, book_returns, lagged, turnover
 from weightcraft.cross_section import (
@@ -168,6 +169,10 @@ def test_a_stack_of_one_degenerate_panel_reduces_without_complaint(
             weighted_nanmean_stack_over_time(stack, np.ones((1, values.shape[0]))).shape
             == values.shape
         )
+        filled = zero_filled_stack(stack)
+        assert filled.shape == stack.shape
+        # The point of the fill: whatever went in, nothing missing comes out.
+        assert bool(np.isfinite(filled).all())
 
 
 @SERIES

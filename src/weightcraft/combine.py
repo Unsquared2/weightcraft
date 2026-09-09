@@ -37,6 +37,17 @@ def _usable(stack: Cube) -> Cube:
     return blanked
 
 
+def zero_filled_stack(stack: Cube) -> Cube:
+    """The stack with every missing cell at zero, so a reduction counts it as flat.
+
+    The opposite reading to the `nan*` reductions below, which drop a missing
+    cell from the denominator; `present` decides what is missing, so an
+    infinity is filled the same way a NaN is.
+    """
+    filled: Cube = np.where(present(stack), stack, 0.0)
+    return filled
+
+
 def _validated_shares(shares: Vector | Matrix, expected: tuple[int, ...]) -> None:
     if shares.shape != expected:
         msg = f"expected shares of shape {expected}, got {shares.shape}"
