@@ -5,11 +5,12 @@ no global state. Missing data is NaN, and a function that fills it says so in
 its name.
 """
 
-from weightcraft.align import AlignedStack, align
+from weightcraft.align import AlignedStack, align, carried
 from weightcraft.arrays import (
     BoolMatrix,
     Cube,
     Dates,
+    Duration,
     IntVector,
     Matrix,
     Vector,
@@ -17,6 +18,7 @@ from weightcraft.arrays import (
 from weightcraft.band import no_trade_band
 from weightcraft.combine import (
     mean_stack,
+    mean_stack_over_time,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
@@ -93,6 +95,7 @@ __all__ = [
     "BoolMatrix",
     "Cube",
     "Dates",
+    "Duration",
     "EqualRiskConfig",
     "IntVector",
     "Matrix",
@@ -106,6 +109,7 @@ __all__ = [
     "book_returns",
     "cagr",
     "capped",
+    "carried",
     "center",
     "clip_allocation",
     "compounded",
@@ -123,6 +127,7 @@ __all__ = [
     "lagged",
     "max_drawdown",
     "mean_stack",
+    "mean_stack_over_time",
     "nanmean_stack",
     "nanmedian_stack",
     "net",

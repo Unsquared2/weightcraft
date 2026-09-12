@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
 from conftest import dates, frame
-from weightcraft.align import align
+from weightcraft.align import align, carried
 from weightcraft.combine import (
     mean_stack,
+    mean_stack_over_time,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
@@ -15,6 +18,9 @@ from weightcraft.combine import (
     weighted_nanmean_stack_over_time,
 )
 from weightcraft.frame import WeightFrame
+
+if TYPE_CHECKING:
+    from weightcraft.arrays import Cube, Dates, Matrix
 
 
 def test_align_takes_the_union_of_assets_rather_than_the_intersection() -> None:
@@ -210,3 +216,155 @@ def test_scaling_every_share_by_the_same_amount_is_the_same_mean() -> None:
     plain = weighted_mean_stack(stack.values, np.asarray([3.0, 1.0]))
     scaled = weighted_mean_stack(stack.values, np.asarray([300.0, 100.0]))
     assert plain.tolist() == scaled.tolist()
+
+
+# ---------------------------------------------------------------------- carried
+
+
+def _hours(count: int, start: str = "2026-01-01") -> Dates:
+    """`count` consecutive hours from `start`, at nanosecond resolution."""
+    origin = np.datetime64(start, "ns")
+    hour = np.timedelta64(1, "h").astype("timedelta64[ns]")
+    out: Dates = origin + np.arange(count) * hour
+    return out
+
+
+def test_carried_gives_each_grid_row_the_newest_frame_row_at_or_before_it() -> None:
+    held = carried(frame(("BTC",), [[1.0], [2.0]]), _hours(48))
+    assert np.array_equal(held.dates, _hours(48))
+    assert np.array_equal(held.values[:24], np.full((24, 1), 1.0))
+    assert np.array_equal(held.values[24:], np.full((24, 1), 2.0))
+
+
+def test_carried_leaves_grid_rows_before_the_frames_first_row_missing() -> None:
+    """Absent because the book had not started, which is not a flat position."""
+    held = carried(frame(("BTC",), [[1.0]]), _hours(3, "2025-12-31T22:00"))
+    assert np.array_equal(
+        held.values, np.asarray([[np.nan], [np.nan], [1.0]]), equal_nan=True
+    )
+
+
+def test_carried_holds_the_last_row_across_every_grid_row_after_it() -> None:
+    held = carried(frame(("BTC",), [[1.0]]), _hours(3))
+    assert np.array_equal(held.values, np.full((3, 1), 1.0))
+
+
+def test_carried_keeps_a_missing_cell_missing_rather_than_carrying_a_position() -> None:
+    """A hole is "not held", so filling it would reopen a closed position."""
+    held = carried(frame(("BTC", "ETH"), [[1.0, np.nan]]), _hours(2))
+    assert np.array_equal(
+        held.values, np.asarray([[1.0, np.nan], [1.0, np.nan]]), equal_nan=True
+    )
+
+
+def test_carried_blanks_a_row_it_would_have_carried_further_than_max_age() -> None:
+    held = carried(frame(("BTC",), [[1.0]]), _hours(4), max_age=np.timedelta64(2, "h"))
+    assert np.array_equal(
+        held.values,
+        np.asarray([[1.0], [1.0], [1.0], [np.nan]]),
+        equal_nan=True,
+    )
+
+
+def test_carried_without_a_max_age_carries_without_bound() -> None:
+    held = carried(frame(("BTC",), [[1.0]]), _hours(1000))
+    assert np.array_equal(held.values, np.full((1000, 1), 1.0))
+
+
+def test_carried_onto_a_frames_own_dates_returns_that_frame() -> None:
+    original = frame(("BTC", "ETH"), [[1.0, np.nan], [2.0, 3.0]])
+    assert carried(original, original.dates) == original
+
+
+def test_carried_is_idempotent() -> None:
+    grid = _hours(48)
+    once = carried(frame(("BTC",), [[1.0], [2.0]]), grid)
+    assert carried(once, grid) == once
+
+
+def test_carried_is_indifferent_to_the_order_the_frames_rows_arrive_in() -> None:
+    sorted_frame = frame(("BTC",), [[1.0], [2.0]])
+    shuffled = WeightFrame(
+        dates=sorted_frame.dates[::-1],
+        assets=sorted_frame.assets,
+        values=sorted_frame.values[::-1],
+    )
+    grid = _hours(48)
+    assert carried(shuffled, grid) == carried(sorted_frame, grid)
+
+
+def test_carried_onto_an_empty_grid_is_an_empty_frame() -> None:
+    held = carried(frame(("BTC",), [[1.0]]), _hours(0))
+    assert held.shape == (0, 1)
+
+
+def test_carried_from_a_frame_with_no_rows_is_all_missing_on_the_grid() -> None:
+    empty = WeightFrame(
+        dates=_hours(0), assets=("BTC",), values=np.empty((0, 1), dtype=np.float64)
+    )
+    held = carried(empty, _hours(3))
+    assert np.array_equal(held.values, np.full((3, 1), np.nan), equal_nan=True)
+
+
+# ------------------------------------------------------- mean_stack_over_time
+
+
+def _equal(stack: Cube) -> Matrix:
+    frames, dates = stack.shape[:2]
+    out: Matrix = np.full((frames, dates), 1.0 / frames)
+    return out
+
+
+def test_a_frame_silent_on_a_whole_date_leaves_the_denominator() -> None:
+    """It has no book to be flat with -- unlike a frame quiet about one asset."""
+    stack = align(
+        [frame(("BTC", "ETH"), [[0.4, 0.2]]), frame(("BTC", "ETH"), [[np.nan] * 2])]
+    ).values
+    assert mean_stack(stack).tolist() == [[0.2, 0.1]]
+    assert mean_stack_over_time(stack, _equal(stack)).tolist() == [[0.4, 0.2]]
+
+
+def test_a_frame_quiet_about_one_asset_is_still_flat_there() -> None:
+    """The zero fill survives: only a wholly silent frame-row is dropped."""
+    stack = align(
+        [frame(("BTC", "ETH"), [[0.4, 0.2]]), frame(("BTC", "ETH"), [[0.6, np.nan]])]
+    ).values
+    assert mean_stack_over_time(stack, _equal(stack)).tolist() == [[0.5, 0.1]]
+
+
+def test_it_matches_the_per_frame_mean_when_every_frame_states_every_date() -> None:
+    stack = align(
+        [frame(("BTC",), [[0.4], [0.2]]), frame(("BTC",), [[0.6], [np.nan]])]
+    ).values
+    over_time = mean_stack_over_time(stack, _equal(stack))
+    assert over_time[0].tolist() == mean_stack(stack)[0].tolist()
+
+
+def test_a_date_no_frame_stated_stays_missing() -> None:
+    stack = align([frame(("BTC",), [[np.nan]]), frame(("BTC",), [[np.nan]])]).values
+    assert np.isnan(mean_stack_over_time(stack, _equal(stack))).all()
+
+
+def test_it_weights_the_frames_that_did_state_by_their_own_shares() -> None:
+    """A dropped frame's share leaves with it, so the rest are renormalised.
+
+    `a` at 0.4 with share 0.25 and `b` silent with share 0.75: the answer is
+    `a` alone at 0.4, not `a` diluted to a quarter of itself.
+    """
+    stack = align([frame(("BTC",), [[0.4]]), frame(("BTC",), [[np.nan]])]).values
+    shares: Matrix = np.asarray([[0.25], [0.75]])
+    assert mean_stack_over_time(stack, shares).tolist() == [[0.4]]
+
+
+def test_it_refuses_the_same_bad_shares_every_other_reduction_does() -> None:
+    stack = align([frame(("BTC",), [[0.4]])]).values
+    with pytest.raises(ValueError, match="expected shares of shape"):
+        mean_stack_over_time(stack, np.asarray([[0.5, 0.5]]))
+    with pytest.raises(ValueError, match="non-negative"):
+        mean_stack_over_time(stack, np.asarray([[-1.0]]))
+
+
+def test_an_infinity_is_broken_rather_than_a_held_position() -> None:
+    """`present` calls it missing, so the frame-row counts as silent, not large."""
+    stack = align([frame(("BTC",), [[np.inf]]), frame(("BTC",), [[0.4]])]).values
+    assert mean_stack_over_time(stack, _equal(stack)).tolist() == [[0.4]]

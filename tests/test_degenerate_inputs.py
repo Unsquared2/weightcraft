@@ -15,10 +15,11 @@ import numpy as np
 import pytest
 
 from canonical import EVERY_SERIES, panel
-from weightcraft.align import align
+from weightcraft.align import align, carried
 from weightcraft.band import no_trade_band
 from weightcraft.combine import (
     mean_stack,
+    mean_stack_over_time,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
@@ -154,6 +155,10 @@ def test_a_frame_survives_every_degenerate_panel(values: Matrix) -> None:
     assert frame.shape == values.shape
     assert WeightFrame.from_polars(frame.to_polars()) == frame
     assert align([frame]).values.shape == (1, *values.shape)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert carried(frame, frame.dates) == frame
+        assert carried(frame, frame.dates[:0]).shape == (0, values.shape[1])
 
 
 @PANELS
@@ -165,6 +170,8 @@ def test_a_stack_of_one_degenerate_panel_reduces_without_complaint(
         warnings.simplefilter("error")
         assert nanmean_stack(stack).shape == values.shape
         assert nanmedian_stack(stack).shape == values.shape
+        equal = np.full(stack.shape[:2], 1.0)
+        assert mean_stack_over_time(stack, equal).shape == values.shape
         assert weighted_nanmean_stack(stack, np.asarray([1.0])).shape == values.shape
         assert (
             weighted_nanmean_stack_over_time(stack, np.ones((1, values.shape[0]))).shape
