@@ -18,6 +18,7 @@ from weightcraft.arrays import (
 from weightcraft.band import no_trade_band
 from weightcraft.combine import (
     mean_stack,
+    mean_stack_over_time,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
@@ -126,6 +127,7 @@ __all__ = [
     "lagged",
     "max_drawdown",
     "mean_stack",
+    "mean_stack_over_time",
     "nanmean_stack",
     "nanmedian_stack",
     "net",

@@ -9,6 +9,7 @@ from conftest import dates, frame
 from weightcraft.align import align, carried
 from weightcraft.combine import (
     mean_stack,
+    mean_stack_over_time,
     nanmean_stack,
     nanmedian_stack,
     normalised_shares,
@@ -19,7 +20,7 @@ from weightcraft.combine import (
 from weightcraft.frame import WeightFrame
 
 if TYPE_CHECKING:
-    from weightcraft.arrays import Dates
+    from weightcraft.arrays import Cube, Dates, Matrix
 
 
 def test_align_takes_the_union_of_assets_rather_than_the_intersection() -> None:
@@ -303,3 +304,67 @@ def test_carried_from_a_frame_with_no_rows_is_all_missing_on_the_grid() -> None:
     )
     held = carried(empty, _hours(3))
     assert np.array_equal(held.values, np.full((3, 1), np.nan), equal_nan=True)
+
+
+# ------------------------------------------------------- mean_stack_over_time
+
+
+def _equal(stack: Cube) -> Matrix:
+    frames, dates = stack.shape[:2]
+    out: Matrix = np.full((frames, dates), 1.0 / frames)
+    return out
+
+
+def test_a_frame_silent_on_a_whole_date_leaves_the_denominator() -> None:
+    """It has no book to be flat with -- unlike a frame quiet about one asset."""
+    stack = align(
+        [frame(("BTC", "ETH"), [[0.4, 0.2]]), frame(("BTC", "ETH"), [[np.nan] * 2])]
+    ).values
+    assert mean_stack(stack).tolist() == [[0.2, 0.1]]
+    assert mean_stack_over_time(stack, _equal(stack)).tolist() == [[0.4, 0.2]]
+
+
+def test_a_frame_quiet_about_one_asset_is_still_flat_there() -> None:
+    """The zero fill survives: only a wholly silent frame-row is dropped."""
+    stack = align(
+        [frame(("BTC", "ETH"), [[0.4, 0.2]]), frame(("BTC", "ETH"), [[0.6, np.nan]])]
+    ).values
+    assert mean_stack_over_time(stack, _equal(stack)).tolist() == [[0.5, 0.1]]
+
+
+def test_it_matches_the_per_frame_mean_when_every_frame_states_every_date() -> None:
+    stack = align(
+        [frame(("BTC",), [[0.4], [0.2]]), frame(("BTC",), [[0.6], [np.nan]])]
+    ).values
+    over_time = mean_stack_over_time(stack, _equal(stack))
+    assert over_time[0].tolist() == mean_stack(stack)[0].tolist()
+
+
+def test_a_date_no_frame_stated_stays_missing() -> None:
+    stack = align([frame(("BTC",), [[np.nan]]), frame(("BTC",), [[np.nan]])]).values
+    assert np.isnan(mean_stack_over_time(stack, _equal(stack))).all()
+
+
+def test_it_weights_the_frames_that_did_state_by_their_own_shares() -> None:
+    """A dropped frame's share leaves with it, so the rest are renormalised.
+
+    `a` at 0.4 with share 0.25 and `b` silent with share 0.75: the answer is
+    `a` alone at 0.4, not `a` diluted to a quarter of itself.
+    """
+    stack = align([frame(("BTC",), [[0.4]]), frame(("BTC",), [[np.nan]])]).values
+    shares: Matrix = np.asarray([[0.25], [0.75]])
+    assert mean_stack_over_time(stack, shares).tolist() == [[0.4]]
+
+
+def test_it_refuses_the_same_bad_shares_every_other_reduction_does() -> None:
+    stack = align([frame(("BTC",), [[0.4]])]).values
+    with pytest.raises(ValueError, match="expected shares of shape"):
+        mean_stack_over_time(stack, np.asarray([[0.5, 0.5]]))
+    with pytest.raises(ValueError, match="non-negative"):
+        mean_stack_over_time(stack, np.asarray([[-1.0]]))
+
+
+def test_an_infinity_is_broken_rather_than_a_held_position() -> None:
+    """`present` calls it missing, so the frame-row counts as silent, not large."""
+    stack = align([frame(("BTC",), [[np.inf]]), frame(("BTC",), [[0.4]])]).values
+    assert mean_stack_over_time(stack, _equal(stack)).tolist() == [[0.4]]

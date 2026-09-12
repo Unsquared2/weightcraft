@@ -125,6 +125,24 @@ def weighted_nanmean_stack_over_time(stack: Cube, shares: Matrix) -> Matrix:
     return combined
 
 
+def mean_stack_over_time(stack: Cube, shares: Matrix) -> Matrix:
+    """`weighted_mean_stack` per (frame, date), a frame silent on a whole date dropped.
+
+    The zero fill answers what a frame saying nothing about one *asset* means;
+    a frame that stated nothing at all on a date has no book to be flat with,
+    so it leaves the denominator rather than being averaged in at zero.
+    """
+    _validated_shares(shares, stack.shape[:2])
+    usable = present(stack)
+    stated = usable.any(axis=2)
+    weights = np.where(stated, shares, 0.0)[:, :, None]
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        numerator = (np.where(usable, stack, 0.0) * weights).sum(axis=0)
+        denominator = weights.sum(axis=0)
+        combined: Matrix = np.where(denominator > 0.0, numerator / denominator, np.nan)
+    return combined
+
+
 def normalised_shares(raw: Vector) -> Vector:
     """Scale non-negative scores to sum to one; an all-zero set falls back to equal."""
     finite = np.where(np.isfinite(raw) & (raw > 0.0), raw, 0.0)
