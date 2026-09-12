@@ -5,11 +5,12 @@ no global state. Missing data is NaN, and a function that fills it says so in
 its name.
 """
 
-from weightcraft.align import AlignedStack, align
+from weightcraft.align import AlignedStack, align, carried
 from weightcraft.arrays import (
     BoolMatrix,
     Cube,
     Dates,
+    Duration,
     IntVector,
     Matrix,
     Vector,
@@ -93,6 +94,7 @@ __all__ = [
     "BoolMatrix",
     "Cube",
     "Dates",
+    "Duration",
     "EqualRiskConfig",
     "IntVector",
     "Matrix",
@@ -106,6 +108,7 @@ __all__ = [
     "book_returns",
     "cagr",
     "capped",
+    "carried",
     "center",
     "clip_allocation",
     "compounded",

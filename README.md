@@ -44,7 +44,7 @@ sized = equal_risk_weights(returns, holdings, EqualRiskConfig(period=90, rebalan
 | Module | What it holds |
 | --- | --- |
 | `frame` | `WeightFrame`, the immutable dates x assets container, plus polars interop |
-| `align` | union-aligning several frames into one `(sources, dates, assets)` stack |
+| `align` | union-aligning several frames into one `(sources, dates, assets)` stack, plus `carried`, which holds one frame's rows across a finer grid |
 | `combine` | reductions over a stack: mean and weighted mean (skipping or filling a gap), median, share normalisation |
 | `normalize` | gross, net, caps, lot sizes, tilts, quantile bins to a long/short book |
 | `risk` | trailing volatility, inverse-vol, equal risk contribution, volatility targeting |

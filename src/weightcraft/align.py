@@ -12,7 +12,7 @@ from weightcraft.frame import WeightFrame
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from weightcraft.arrays import Cube, Dates, Matrix
+    from weightcraft.arrays import Cube, Dates, Duration, Matrix
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -67,3 +67,30 @@ def align(frames: Sequence[WeightFrame]) -> AlignedStack:
 
     stacked.flags.writeable = False
     return AlignedStack(dates=dates, assets=assets, values=stacked)
+
+
+def carried(
+    frame: WeightFrame, grid: Dates, *, max_age: Duration | None = None
+) -> WeightFrame:
+    """`frame`'s newest row at or before each grid row, missing where there is none.
+
+    A position is unchanged between rebalances, so repeating the last row across
+    the grid rows it covers is exact rather than an approximation. Rows before
+    the frame's first, and rows further than `max_age` past the one that would
+    carry, are NaN: a book not yet stated is absent, never flat.
+    """
+    columns = len(frame.assets)
+    held: Matrix = np.full((grid.size, columns), np.nan)
+    if frame.has_dates and grid.size:
+        order = np.argsort(frame.dates)
+        dates = frame.dates[order]
+        values = frame.values[order]
+        previous = np.searchsorted(dates, grid, side="right") - 1
+        # A hole is "this asset is not held", which a fill cannot tell from the
+        # blanks the grid itself introduces -- so gather whole rows rather than
+        # forward-filling cells, and a closed position stays closed.
+        stated = previous >= 0
+        if max_age is not None:
+            stated[stated] &= (grid[stated] - dates[previous[stated]]) <= max_age
+        held[stated] = values[previous[stated]]
+    return WeightFrame(dates=grid, assets=frame.assets, values=held)

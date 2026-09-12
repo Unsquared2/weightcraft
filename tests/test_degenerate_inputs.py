@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from canonical import EVERY_SERIES, panel
-from weightcraft.align import align
+from weightcraft.align import align, carried
 from weightcraft.band import no_trade_band
 from weightcraft.combine import (
     mean_stack,
@@ -154,6 +154,10 @@ def test_a_frame_survives_every_degenerate_panel(values: Matrix) -> None:
     assert frame.shape == values.shape
     assert WeightFrame.from_polars(frame.to_polars()) == frame
     assert align([frame]).values.shape == (1, *values.shape)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert carried(frame, frame.dates) == frame
+        assert carried(frame, frame.dates[:0]).shape == (0, values.shape[1])
 
 
 @PANELS

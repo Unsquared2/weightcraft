@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 from hypothesis.extra.numpy import array_shapes, arrays
 
 from conftest import panel_frame
-from weightcraft.align import align
+from weightcraft.align import align, carried
 from weightcraft.combine import nanmean_stack, normalised_shares
 from weightcraft.frame import WeightFrame
 from weightcraft.normalize import capped, gross, net, to_gross, weights_from_bins
@@ -147,3 +147,23 @@ def test_normalised_shares_always_sum_to_one(raw: Vector) -> None:
 def test_a_polars_round_trip_never_changes_a_frame(values: Matrix) -> None:
     original = panel_frame(values)
     assert WeightFrame.from_polars(original.to_polars()) == original
+
+
+@given(values=_PANEL, offset=st.integers(min_value=-48, max_value=48))
+@settings(max_examples=200)
+def test_carrying_never_reads_a_row_later_than_the_one_it_lands_on(
+    values: Matrix, offset: int
+) -> None:
+    """The point-in-time property: every carried row is one that already existed."""
+    frame = panel_frame(values)
+    hour = np.timedelta64(1, "h").astype("timedelta64[ns]")
+    grid = frame.dates + offset * hour if frame.has_dates else frame.dates
+    held = carried(frame, grid)
+    for row, moment in enumerate(grid):
+        stated = frame.dates <= moment
+        if not stated.any():
+            assert np.isnan(held.values[row]).all()
+            continue
+        candidates = np.flatnonzero(stated)
+        newest = frame.values[candidates[np.argmax(frame.dates[candidates])]]
+        assert np.array_equal(held.values[row], newest, equal_nan=True)
