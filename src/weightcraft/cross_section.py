@@ -11,12 +11,25 @@ if TYPE_CHECKING:
 
 _ORTHOGONALISATION_PASSES = 2
 _RANK_TOLERANCE = 1e-12
+_MINIMUM_RANKED = 2
 
 
 def row_counts(values: Matrix) -> Vector:
     """How many cells each row actually observed."""
     counts: Vector = np.isfinite(values).sum(axis=1).astype(np.float64)
     return counts
+
+
+def row_means(values: Matrix) -> Matrix:
+    """Per-row mean of the finite cells, kept as a column for broadcasting.
+
+    An infinity is missing, as in `row_counts`; a row with nothing finite has no mean.
+    """
+    present = np.isfinite(values)
+    counts = present.sum(axis=1, keepdims=True)
+    total = np.where(present, values, 0.0).sum(axis=1, keepdims=True)
+    mean: Matrix = np.where(counts > 0, total / np.maximum(counts, 1), np.nan)
+    return mean
 
 
 def standardize_rows(values: Matrix, ddof: int = 0) -> Matrix:
@@ -56,6 +69,24 @@ def row_rank_pct(values: Matrix) -> Matrix:
             continue
         order = present[np.argsort(values[row, present], kind="stable")]
         out[row, order] = (np.arange(order.size, dtype=np.float64) + 1.0) / order.size
+    return out
+
+
+def row_rank_minmax(values: Matrix) -> Matrix:
+    """Per-row `(rank - 1) / (n - 1)` over the finite cells, ties sharing their average.
+
+    Lowest 0, highest 1; a row with fewer than two finite cells is missing.
+    """
+    out: Matrix = np.full(values.shape, np.nan)
+    for row in range(values.shape[0]):
+        present = np.flatnonzero(np.isfinite(values[row]))
+        if present.size < _MINIMUM_RANKED:
+            continue
+        _, tie, sizes = np.unique(
+            values[row, present], return_inverse=True, return_counts=True
+        )
+        average = np.cumsum(sizes) - (sizes - 1) / 2.0
+        out[row, present] = (average[tie] - 1.0) / (present.size - 1.0)
     return out
 
 

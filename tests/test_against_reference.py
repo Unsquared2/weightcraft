@@ -19,6 +19,8 @@ from weightcraft.band import no_trade_band
 from weightcraft.costs import turnover
 from weightcraft.cross_section import (
     project_out_rows,
+    row_means,
+    row_rank_minmax,
     row_rank_pct,
     standardize_rows,
     top_n_mask,
@@ -198,6 +200,29 @@ def naive_rank_pct(values: Matrix) -> Matrix:
     return out
 
 
+def naive_rank_minmax(values: Matrix) -> Matrix:
+    out = np.full(values.shape, np.nan)
+    for row in range(values.shape[0]):
+        seen = [v for v in values[row] if np.isfinite(v)]
+        if len(seen) < 2:
+            continue
+        for column, value in enumerate(values[row]):
+            if np.isfinite(value):
+                below = sum(other < value for other in seen)
+                tied = sum(other == value for other in seen)
+                out[row, column] = (below + (tied - 1) / 2) / (len(seen) - 1)
+    return out
+
+
+def naive_row_means(values: Matrix) -> Matrix:
+    out = np.full((values.shape[0], 1), np.nan)
+    for row in range(values.shape[0]):
+        seen = [v for v in values[row] if np.isfinite(v)]
+        if seen:
+            out[row, 0] = sum(seen) / len(seen)
+    return out
+
+
 def naive_prices(returns: Vector, base: float = 1.0) -> Vector:
     out = np.full(returns.size, np.nan)
     price = base
@@ -363,6 +388,23 @@ def test_a_percentile_rank_matches_the_obvious_loop() -> None:
         [[3.0, 1.0, 2.0], [np.nan, 5.0, 5.0], [1.0, np.nan, np.nan]]
     )
     assert np.allclose(row_rank_pct(values), naive_rank_pct(values), equal_nan=True)
+
+
+def test_a_minmax_rank_matches_the_obvious_loop_on_a_tied_gappy_panel() -> None:
+    generator = np.random.default_rng(41)
+    values: Matrix = generator.integers(0, 5, size=(40, 6)).astype(np.float64)
+    values[generator.random(values.shape) < 0.2] = np.nan
+    values[0, 0] = np.inf
+    assert np.allclose(
+        row_rank_minmax(values), naive_rank_minmax(values), equal_nan=True
+    )
+
+
+def test_row_means_match_the_obvious_loop() -> None:
+    values: Matrix = np.column_stack([NOISE[:40], SPARSE_NOISE[:40], NOISE[40:80]])
+    values[3] = np.nan
+    values[5, 1] = -np.inf
+    assert np.allclose(row_means(values), naive_row_means(values), equal_nan=True)
 
 
 def test_the_top_n_mask_matches_sorting_the_row() -> None:

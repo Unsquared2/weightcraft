@@ -27,6 +27,9 @@ def _validated(window: int, min_periods: int) -> None:
     if min_periods < _MINIMUM_PERIODS:
         msg = f"min_periods must be at least {_MINIMUM_PERIODS}, got {min_periods}"
         raise ValueError(msg)
+    if min_periods > window:
+        msg = f"a window of {window} can never hold {min_periods} observations"
+        raise ValueError(msg)
 
 
 def windowed(values: Matrix, window: int) -> Cube:
@@ -151,6 +154,8 @@ def rolling_correlation(
     left: Matrix, right: Matrix, window: int, min_periods: int
 ) -> Matrix:
     """Pearson correlation of two panels over a trailing window, per column.
+
+    A single-column `right` is read against every column of `left`.
 
     Pairwise-complete: a row where either side is missing costs that row for
     both, not the whole window -- the same rule every reduction in this

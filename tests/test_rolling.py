@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
@@ -12,6 +14,9 @@ from weightcraft.rolling import (
     rolling_slope,
     windowed,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_the_current_row_is_the_last_slice_of_the_window() -> None:
@@ -198,6 +203,44 @@ def test_rolling_correlation_costs_a_pair_its_own_row_not_the_window() -> None:
 def test_rolling_correlation_refuses_a_zero_min_periods() -> None:
     with pytest.raises(ValueError, match="min_periods"):
         rolling_correlation(np.zeros((2, 1)), np.zeros((2, 1)), 2, 0)
+
+
+def test_rolling_correlation_reads_a_single_column_against_every_column() -> None:
+    rng = np.random.default_rng(5)
+    left = rng.normal(size=(30, 3))
+    left[rng.random(left.shape) < 0.1] = np.nan
+    right = rng.normal(size=(30, 1))
+    got = rolling_correlation(left, right, 6, 4)
+    expected = rolling_correlation(left, np.repeat(right, 3, axis=1), 6, 4)
+    assert np.array_equal(got, expected, equal_nan=True)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: partial_rolling_mean(np.zeros((4, 1)), 2, 3),
+        lambda: partial_rolling_std(np.zeros((4, 1)), 2, 3),
+        lambda: partial_rolling_std(np.zeros((4, 1)), 1, 1),
+        lambda: rolling_extreme(np.zeros((4, 1)), 2, 3, lowest=True),
+        lambda: bars_since_extreme(np.zeros((4, 1)), 2, 3, lowest=True),
+        lambda: rolling_correlation(np.zeros((4, 1)), np.zeros((4, 1)), 2, 3),
+        lambda: rolling_slope(np.zeros((4, 1)), 2, 3),
+    ],
+    ids=[
+        "mean",
+        "std",
+        "sample_std_of_one_row",
+        "extreme",
+        "bars_since_extreme",
+        "correlation",
+        "slope",
+    ],
+)
+def test_a_floor_the_window_can_never_hold_is_refused_rather_than_blank(
+    call: Callable[[], object],
+) -> None:
+    with pytest.raises(ValueError, match="can never hold"):
+        call()
 
 
 def test_rolling_slope_matches_a_naive_windowed_polyfit() -> None:
