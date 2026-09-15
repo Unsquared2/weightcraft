@@ -35,6 +35,8 @@ from weightcraft.combine import (
 from weightcraft.costs import apply_costs, book_returns, lagged, turnover
 from weightcraft.cross_section import (
     project_out_rows,
+    row_means,
+    row_rank_minmax,
     row_rank_pct,
     standardize_rows,
     top_n_mask,
@@ -76,6 +78,8 @@ from weightcraft.risk import (
 from weightcraft.smoothing import ewm_mean, lag_rows, rolling_mean
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from weightcraft.arrays import Matrix, Vector
 
 SERIES = pytest.mark.parametrize(
@@ -228,18 +232,33 @@ def test_shifting_a_row_does_not_change_its_z_score(shift: float) -> None:
     )
 
 
+RANKINGS = pytest.mark.parametrize("rank", [row_rank_pct, row_rank_minmax])
+
+
+@RANKINGS
 @pytest.mark.parametrize("shift", [3.0, -3.0])
-def test_shifting_a_row_does_not_change_its_ranking(shift: float) -> None:
+def test_shifting_a_row_does_not_change_its_ranking(
+    shift: float, rank: Callable[[Matrix], Matrix]
+) -> None:
     values: Matrix = np.asarray([[1.0, 5.0, 3.0, np.nan]])
-    assert np.allclose(
-        row_rank_pct(values + shift), row_rank_pct(values), equal_nan=True
-    )
+    assert np.allclose(rank(values + shift), rank(values), equal_nan=True)
 
 
-def test_any_increasing_transform_leaves_the_ranking_alone() -> None:
+@RANKINGS
+def test_any_increasing_transform_leaves_the_ranking_alone(
+    rank: Callable[[Matrix], Matrix],
+) -> None:
     values: Matrix = np.asarray([[0.1, 0.5, 0.3, 0.9]])
     for transform in (np.exp, np.sqrt, lambda x: x**3):
-        assert np.allclose(row_rank_pct(transform(values)), row_rank_pct(values))
+        assert np.allclose(rank(transform(values)), rank(values))
+
+
+@pytest.mark.parametrize("shift", [2.0, -7.0])
+def test_shifting_a_row_shifts_its_mean_by_as_much(shift: float) -> None:
+    values: Matrix = np.asarray([[1.0, 5.0, np.nan], [np.nan, np.nan, np.nan]])
+    assert np.allclose(
+        row_means(values + shift), row_means(values) + shift, equal_nan=True
+    )
 
 
 # --------------------------------------------------------------------------

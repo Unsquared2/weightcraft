@@ -9,6 +9,8 @@ from weightcraft.cross_section import (
     project_out_rows,
     residualize_rows,
     row_counts,
+    row_means,
+    row_rank_minmax,
     row_rank_pct,
     standardize_rows,
     top_n_mask,
@@ -100,6 +102,35 @@ def test_a_percentile_rank_skips_a_gap() -> None:
     assert ranked[0, 0] == pytest.approx(1.0)
     assert np.isnan(ranked[0, 1])
     assert np.isnan(row_rank_pct(np.asarray([[np.nan]]))).all()
+
+
+def test_row_means_skip_what_is_not_finite_and_keep_the_column_shape() -> None:
+    means = row_means(np.asarray([[1.0, np.nan, 2.0], [4.0, np.inf, 6.0]]))
+    assert means.tolist() == [[1.5], [5.0]]
+
+
+def test_a_row_with_nothing_finite_has_no_mean() -> None:
+    assert np.isnan(row_means(np.asarray([[np.nan, np.inf]]))).all()
+
+
+def test_a_minmax_rank_puts_the_lowest_at_zero_and_the_largest_at_one() -> None:
+    ranked = row_rank_minmax(np.asarray([[3.0, 1.0, 2.0]]))
+    assert ranked.tolist() == [[1.0, 0.0, 0.5]]
+
+
+def test_tied_cells_share_their_average_minmax_rank() -> None:
+    ranked = row_rank_minmax(np.asarray([[1.0, 2.0, 2.0, 3.0]]))
+    assert ranked.tolist() == [[0.0, 0.5, 0.5, 1.0]]
+
+
+def test_a_minmax_rank_skips_what_is_not_finite() -> None:
+    ranked = row_rank_minmax(np.asarray([[3.0, np.nan, 1.0, np.inf]]))
+    assert ranked[0, [0, 2]].tolist() == [1.0, 0.0]
+    assert np.isnan(ranked[0, [1, 3]]).all()
+
+
+def test_a_lone_cell_has_no_minmax_rank_since_it_is_both_ends() -> None:
+    assert np.isnan(row_rank_minmax(np.asarray([[5.0, np.nan]]))).all()
 
 
 def test_the_top_n_mask_selects_the_largest() -> None:
