@@ -31,4 +31,4 @@ def drifted_weights(
         nav = 1.0 + np.sum(targets * (relative - 1.0), axis=1, keepdims=True)
         valid_nav = np.isfinite(nav) & (nav > 0.0)
         result: Matrix = np.where(valid[:, None] & valid_nav, exposure / nav, np.nan)
-    return result
+    return np.where(np.isfinite(result).all(axis=1, keepdims=True), result, np.nan)

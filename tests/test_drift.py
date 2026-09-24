@@ -85,3 +85,29 @@ def test_an_unknown_weight_invalidates_the_whole_row(weight: float) -> None:
 def test_price_rows_cannot_silently_broadcast_across_targets() -> None:
     with pytest.raises(ValueError, match="same shape"):
         drifted_weights(np.ones((2, 2)), np.ones((1, 2)), np.ones((2, 2)))
+
+
+def test_overflowed_exposure_is_unavailable_even_when_nav_is_finite() -> None:
+    result = drifted_weights(np.array([[1e308]]), np.array([[1.0]]), np.array([[2.0]]))
+
+    assert np.isnan(result).all()
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"), [(-0.5, -55.0 / 95.0), (2.0, 220.0 / 120.0), (0.0, 0.0)]
+)
+def test_signed_and_leveraged_positions_use_the_portfolios_equity(
+    target: float, expected: float
+) -> None:
+    result = drifted_weights(
+        np.array([[target]]), np.array([[100.0]]), np.array([[110.0]])
+    )
+
+    assert result[0, 0] == pytest.approx(expected)
+
+
+def test_valuation_at_the_target_anchor_preserves_the_target() -> None:
+    targets = np.array([[0.5, -0.2, 2.0, 0.0]])
+    prices = np.array([[100.0, 20.0, 40.0, np.nan]])
+
+    assert drifted_weights(targets, prices, prices) == pytest.approx(targets)
