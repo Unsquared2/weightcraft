@@ -25,6 +25,7 @@ from weightcraft.cross_section import (
     standardize_rows,
     top_n_mask,
 )
+from weightcraft.drift import drifted_weights
 from weightcraft.metrics import (
     beta,
     compounded,
@@ -528,4 +529,28 @@ def test_capped_matches_the_row_by_row_loop() -> None:
         capped(target, max_gross=0.5, max_net=0.2),
         naive_capped(target, max_gross=0.5, max_net=0.2),
         equal_nan=True,
+    )
+
+
+def test_weight_drift_matches_an_independent_quantity_and_cash_ledger() -> None:
+    targets = np.array([[0.5, 0.2, -0.3], [-0.5, 0.0, 0.7], [2.0, 0.0, 0.0]])
+    initial = np.array([[100.0, 40.0, 10.0]] * 3)
+    current = np.array([[110.0, 30.0, 20.0]] * 3)
+    expected = []
+    for weights, before, after in zip(targets, initial, current, strict=True):
+        units = [
+            100.0 * weight / price
+            for weight, price in zip(weights, before, strict=True)
+        ]
+        cash = 100.0 - sum(
+            quantity * price for quantity, price in zip(units, before, strict=True)
+        )
+        positions = [
+            quantity * price for quantity, price in zip(units, after, strict=True)
+        ]
+        equity = cash + sum(positions)
+        expected.append([position / equity for position in positions])
+
+    assert drifted_weights(targets, initial, current) == pytest.approx(
+        np.array(expected)
     )

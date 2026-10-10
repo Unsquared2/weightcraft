@@ -37,6 +37,7 @@ from weightcraft.cross_section import (
     standardize_rows,
     top_n_mask,
 )
+from weightcraft.drift import drifted_weights
 from weightcraft.frame import DATE_COLUMN, WeightFrame
 from weightcraft.metrics import (
     DEGENERATE_SHARPE,
@@ -117,6 +118,7 @@ __all__ = [
     "compounded",
     "downside_deviation",
     "drawdown",
+    "drifted_weights",
     "equal_risk_row",
     "equal_risk_weights",
     "ewm_mean",
